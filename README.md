@@ -7,7 +7,7 @@ Choreo-Mini is a lightweight python MetaFramework created to simplify agent crea
 - Enables the developer to developer to create agents without the learning curve of any modern frameworks (LangGraph/CrewAI/Autogen). 
 - Enables Agent Development in a more pythonic way
 - Enables portability by allowing the user to convert the code into any of the frameworks of their choice
-- Enables Profiling as a first-class features, so it is easy to debug and optimize Agent Workflows
+- Enables workflow observability that tracks latency, memory utilization, and execution loops across agent nodes, enabling debugging and performance optimization
 
 ## Installation
 
