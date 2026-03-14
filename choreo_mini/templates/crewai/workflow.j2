@@ -1,0 +1,48 @@
+"""Generated CrewAI workflow from choreo-mini code."""
+
+from crewai import Agent, Task, Crew
+{% for imp in imports %}
+{{ imp }}
+{% endfor %}
+
+# Create agents
+{% for node in nodes %}
+{% if node.type == "AgentNode" %}
+{{ node.var_name }} = Agent(
+    role="{{ node.kwargs.get('role', 'Agent') }}",
+    goal="{{ node.kwargs.get('goals', [''])[0] if node.kwargs.get('goals') else '' }}",
+    backstory="{{ node.kwargs.get('backstory', '') }}",
+    allow_delegation=False,
+    verbose=True
+)
+{% endif %}
+{% endfor %}
+
+# Create tasks based on execution logic
+tasks = []
+{% for logic in execution_logic %}
+{% if logic.type == "call" and logic.call.func.endswith('.execute') %}
+task = Task(
+    description="Execute {{ logic.call.func }}",
+    agent={{ logic.call.args[0] if logic.call.args else 'agent' }},
+    expected_output="Result of execution"
+)
+tasks.append(task)
+{% endif %}
+{% endfor %}
+
+# Create and run crew
+crew = Crew(
+    agents=[{% for node in nodes %}{% if node.type == "AgentNode" %}{{ node.var_name }}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}],
+    tasks=tasks,
+    verbose=True
+)
+
+if __name__ == "__main__":
+    result = crew.kickoff()
+    print("Crew result:", result)
+
+    {% if enable_profiling %}
+    # Profiling data would be collected here
+    print("Profiling enabled but not implemented in CrewAI template")
+    {% endif %}

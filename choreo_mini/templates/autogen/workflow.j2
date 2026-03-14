@@ -1,0 +1,43 @@
+"""Generated AutoGen workflow from choreo-mini code."""
+
+from autogen import AssistantAgent, UserProxyAgent
+{% for imp in imports %}
+{{ imp }}
+{% endfor %}
+
+# Create agents
+{% for node in nodes %}
+{% if node.type == "AgentNode" %}
+{{ node.var_name }} = AssistantAgent(
+    name="{{ node.var_name }}",
+    system_message="{{ node.kwargs.get('system_prompt', 'You are a helpful assistant.') }}",
+    llm_config={"config_list": [{"model": "gpt-4", "api_key": "{{ node.kwargs.get('properties', {}).get('api_key', 'your-key') }}"}]}
+)
+{% endif %}
+{% endfor %}
+
+# Create user proxy
+user_proxy = UserProxyAgent(
+    name="user_proxy",
+    human_input_mode="NEVER",
+    max_consecutive_auto_reply=10,
+    is_termination_msg=lambda x: x.get("content", "").rstrip().endswith("TERMINATE"),
+    code_execution_config=False,
+)
+
+if __name__ == "__main__":
+    # Execute based on workflow logic
+    {% for logic in execution_logic %}
+    {% if logic.type == "call" and logic.call.func == "wf.send" %}
+    response = {{ logic.call.args[0] }}.initiate_chat(
+        {{ logic.call.args[0] }},
+        message="{{ logic.call.args[1] if len(logic.call.args) > 1 else 'Hello' }}"
+    )
+    print("Response:", response)
+    {% endif %}
+    {% endfor %}
+
+    {% if enable_profiling %}
+    # Profiling data would be collected here
+    print("Profiling enabled but not implemented in AutoGen template")
+    {% endif %}

@@ -1,0 +1,118 @@
+"""Generated LangGraph workflow from choreo-mini code."""
+
+from typing import Dict, Any, List
+from langgraph import StateGraph, END
+from langchain_core.messages import HumanMessage, AIMessage
+
+{% for imp in imports %}
+{{ imp }}
+{% endfor %}
+
+# Recreate key variables from the original workflow file
+{% for assign in assignments %}
+{{ assign.target }} = {{ assign.expr }}
+{% endfor %}
+
+# Define the state
+class WorkflowState(Dict[str, Any]):
+    messages: List[Dict[str, Any]]
+    current_agent: str
+    profiling_enabled: bool
+    profiling_data: Dict[str, Any]
+
+# Initialize profiling if enabled
+{% if enable_profiling %}
+profiling_data = {}
+{% endif %}
+
+# Instantiate nodes
+{% for node in nodes %}
+{% if node.type == "AgentNode" %}
+{{ node.var_name }} = AgentNode({{ node.args | join(", ") }}{% for k, v in node.kwargs.items() %}, {{ k }}={{ v }}{% endfor %})
+{% elif node.type == "ServiceNode" %}
+{{ node.var_name }} = ServiceNode({{ node.args | join(", ") }}{% for k, v in node.kwargs.items() %}, {{ k }}={{ v }}{% endfor %})
+{% endif %}
+{% endfor %}
+
+# Define agent nodes
+{% for node in nodes %}
+{% if node.type == "AgentNode" %}
+def {{ node.var_name }}_node(state: WorkflowState) -> WorkflowState:
+    agent = {{ node.var_name }}
+    user_input = state["messages"][-1]["content"] if state["messages"] else ""
+    response = agent.execute(context=user_input)
+
+    new_message = {"role": "assistant", "content": response.content}
+    state["messages"].append(new_message)
+
+    {% if enable_profiling %}
+    # Update profiling data
+    if "{{ node.var_name }}" not in profiling_data:
+        profiling_data["{{ node.var_name }}"] = {"calls": 0, "latency": 0.0, "memory": 0.0}
+    profiling_data["{{ node.var_name }}"]["calls"] += 1
+    # Add latency/memory tracking here
+    {% endif %}
+
+    return state
+{% endif %}
+{% endfor %}
+
+# Define service nodes
+{% for node in nodes %}
+{% if node.type == "ServiceNode" %}
+def {{ node.var_name }}_node(state: WorkflowState) -> WorkflowState:
+    service = {{ node.var_name }}
+    # Execute service and update state
+    result = service.execute({{ workflow_name }}, *state.get("service_args", []))
+    state["service_result"] = result
+    return state
+{% endif %}
+{% endfor %}
+
+# Define conditional routing
+def route_based_on_condition(state: WorkflowState) -> str:
+    # Implement routing logic based on execution_logic
+    {% for logic in execution_logic %}
+    {% if logic.type == "if" %}
+    if {{ logic.condition }}:
+        return "{{ logic.body[0].call.func if logic.body else 'default' }}"
+    {% endif %}
+    {% endfor %}
+    return "default"
+
+# Build the graph
+workflow = StateGraph(WorkflowState)
+
+# Add nodes
+{% for node in nodes %}
+workflow.add_node("{{ node.var_name }}", {{ node.var_name }}_node)
+{% endfor %}
+
+# Add edges based on execution logic
+{% for logic in execution_logic %}
+{% if logic.type == "for_loop" %}
+# Handle for loop logic
+workflow.add_edge("{{ logic.iter_expr.func }}", "{{ logic.body[0].call.func if logic.body else 'default' }}")
+{% elif logic.type == "if" %}
+workflow.add_conditional_edges("{{ logic.body[0].call.func if logic.body else 'start' }}", route_based_on_condition)
+{% endif %}
+{% endfor %}
+
+# Set entry point
+workflow.set_entry_point("{{ nodes[0].var_name if nodes else 'start' }}")
+
+# Compile the graph
+app = workflow.compile()
+
+if __name__ == "__main__":
+    # Example usage
+    initial_state = {
+        "messages": [],
+        "current_agent": "",
+        "profiling_enabled": {{ "True" if enable_profiling else "False" }},
+        "profiling_data": profiling_data if {{ "True" if enable_profiling else "False" }} else {}
+    }
+
+    # Run the graph
+    result = app.invoke(initial_state)
+    print("Final state:", result)

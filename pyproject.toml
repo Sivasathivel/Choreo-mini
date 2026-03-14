@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "choreo-mini"
+version = "0.1.0"
+description = "A short description of your package"
+readme = "README.md"
+requires-python = ">=3.7"
+authors = [
+    { name = "Your Name", email = "your.email@example.com" },
+]
+license = { text = "MIT" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+keywords = ["choreo", "example"]
+dependencies = ["jinja2>=3.0.0"]
+
+[project.scripts]
+choreo-mini = "choreo_mini.cli:main"
+choreo_mini = "choreo_mini.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/sivasathivelkandasamy/choreo-mini"
+Source = "https://github.com/sivasathivelkandasamy/choreo-mini"
+
+[project.optional-dependencies]
+
+dev = [
+    "pytest>=6.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["choreo_mini", "choreo_mini.*"]
