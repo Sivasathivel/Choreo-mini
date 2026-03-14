@@ -1,11 +1,13 @@
-# Choreo
+# Choreo-Mini
 
-`choreo` is a Python library for ... (add a one-line description here).
+Choreo-Mini is a lightweight python MetaFramework created to simplify agent creation and porting among the different modern LLM orchestration runtimes (LangGraph/CrewAI/AutoGen), making it easy to develop and demo LLM Agent orchestration concepts in a “real” runtime.
 
 ## Features
 
-- Describe feature 1
-- Describe feature 2
+- Enables the developer to developer to create agents without the learning curve of any modern frameworks (LangGraph/CrewAI/Autogen). 
+- Enables Agent Development in a more pythonic way
+- Enables portability by allowing the user to convert the code into any of the frameworks of their choice
+- Enables Profiling as a first-class features, so it is easy to debug and optimize Agent Workflows
 
 ## Installation
 
