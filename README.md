@@ -1,20 +1,81 @@
 # Choreo-Mini
 
-Choreo-Mini is a lightweight python MetaFramework created to simplify agent creation and porting among the different modern LLM orchestration runtimes (LangGraph/CrewAI/AutoGen), making it easy to develop and demo LLM Agent orchestration concepts in a “real” runtime.
+Choreo-Mini is a lightweight Python meta-framework designed to simplify the
+development and experimentation of LLM agent workflows.
+
+It allows developers to define agent workflows using a Python-native
+programming model and compile them into modern orchestration runtimes such as:
+
+- LangGraph
+- CrewAI
+- AutoGen
+
+The goal is to remove the framework-specific learning curve while enabling
+developers to experiment with agent orchestration concepts in real execution
+environments.
+
+---
+
+## Status
+
+⚠️ Choreo-Mini is currently an experimental prototype and work in progress.
+Some components may contain bugs or incomplete functionality.
+
+---
+
+## Key Idea
+
+Instead of writing orchestration code directly for a specific framework,
+developers define workflows using simple Python classes.
+
+Choreo-Mini then compiles the workflow into framework-specific code.
+
+Architecture overview:
+
+Developer Python Workflow
+        ↓
+AST Parser
+        ↓
+Intermediate Workflow Representation
+        ↓
+Template Compiler (Jinja2)
+        ↓
+Target Runtime (LangGraph / CrewAI / AutoGen)
+
+---
 
 ## Features
 
-- Enables the developer to developer to create agents without the learning curve of any modern frameworks (LangGraph/CrewAI/Autogen). 
-- Enables Agent Development in a more pythonic way
-- Enables portability by allowing the user to convert the code into any of the frameworks of their choice
-- Enables workflow observability that tracks latency, memory utilization, and execution loops across agent nodes, enabling debugging and performance optimization
+### Pythonic Agent Development
 
+Developers define agents and services using native Python abstractions rather
+than framework-specific DSLs.
+
+### Framework Portability
+
+Workflows can be compiled into different orchestration runtimes, enabling
+experimentation across ecosystems.
+
+### Workflow Observability Layer
+
+Choreo-Mini includes runtime instrumentation that tracks:
+
+- latency across workflow nodes
+- memory utilization
+- execution loops
+
+This enables debugging and performance optimization of agent pipelines.
+
+The observability layer can be extended to track token usage and cost metrics
+for LLM providers.
+
+---
 ## Installation
 
 ```bash
 pip install choreo-mini
 ```
-
+---
 ## Usage
 
 ```python
@@ -47,13 +108,13 @@ for row in input_data:
     else:
         output.append(A3.execute(resp))
 ```
-
+---
 ## Development
 
 1. Clone the repo
 2. Create a virtual environment
 3. Install dependencies
-
+---
 ## License
 
 This project is licensed under the MIT License. See the LICENSE file for details.
