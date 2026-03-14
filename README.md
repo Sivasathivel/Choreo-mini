@@ -12,7 +12,7 @@ Choreo-Mini is a lightweight python MetaFramework created to simplify agent crea
 ## Installation
 
 ```bash
-pip install choreo
+pip install choreo-mini
 ```
 
 ## Usage
