@@ -33,13 +33,13 @@ Choreo-Mini then compiles the workflow into framework-specific code.
 Architecture overview:
 
 Developer Python Workflow
-        ↓
+        ↓  
 AST Parser
-        ↓
+        ↓  
 Intermediate Workflow Representation
-        ↓
+        ↓  
 Template Compiler (Jinja2)
-        ↓
+        ↓  
 Target Runtime (LangGraph / CrewAI / AutoGen)
 
 ---
