@@ -1,118 +1,440 @@
 """Generated LangGraph workflow from choreo-mini code."""
 
-from typing import Dict, Any, List
-from langgraph import StateGraph, END
-from langchain_core.messages import HumanMessage, AIMessage
+from typing import Any, Dict, List, TypedDict
 
-{% for imp in imports %}
-{{ imp }}
+from langgraph.constants import END
+from langgraph.graph import StateGraph
+
+from choreo_mini.core.workflow import Workflow
+
+
+NODE_RUNTIME_NAMES = {
+{% for node in all_nodes %}
+    "{{ node.var_name }}": {{ node.runtime_name_expr }},
 {% endfor %}
+}
 
-# Recreate key variables from the original workflow file
-{% for assign in assignments %}
-{{ assign.target }} = {{ assign.expr }}
+
+NODE_TYPES = {
+{% for node in all_nodes %}
+    "{{ node.var_name }}": "{{ node.type }}",
 {% endfor %}
+}
 
-# Define the state
-class WorkflowState(Dict[str, Any]):
+
+EXECUTION_LOGIC = {{ execution_logic_literal }}
+
+
+SAFE_BUILTINS = {
+    "all": all,
+    "any": any,
+    "bool": bool,
+    "dict": dict,
+    "enumerate": enumerate,
+    "float": float,
+    "int": int,
+    "len": len,
+    "list": list,
+    "max": max,
+    "min": min,
+    "range": range,
+    "set": set,
+    "str": str,
+    "sum": sum,
+    "tuple": tuple,
+}
+
+
+AUGASSIGN_OPERATORS = {
+    "Add": "+",
+    "Sub": "-",
+    "Mult": "*",
+    "Div": "/",
+    "FloorDiv": "//",
+    "Mod": "%",
+}
+
+
+class WorkflowState(TypedDict, total=False):
+    wf: Any
+    input: Any
+    continue_loop: bool
+    loop_budget: int
+    locals: Dict[str, Any]
+    frames: List[Dict[str, Any]]
+    pending_call: Dict[str, Any]
+    pending_node: str
     messages: List[Dict[str, Any]]
-    current_agent: str
-    profiling_enabled: bool
-    profiling_data: Dict[str, Any]
+    last_response: str
+    last_agent: str
+    wf_state: Dict[str, Any]
+    agent_states: Dict[str, Dict[str, Any]]
+    done: bool
 
-# Initialize profiling if enabled
-{% if enable_profiling %}
-profiling_data = {}
-{% endif %}
 
-# Instantiate nodes
-{% for node in nodes %}
-{% if node.type == "AgentNode" %}
-{{ node.var_name }} = AgentNode({{ node.args | join(", ") }}{% for k, v in node.kwargs.items() %}, {{ k }}={{ v }}{% endfor %})
-{% elif node.type == "ServiceNode" %}
-{{ node.var_name }} = ServiceNode({{ node.args | join(", ") }}{% for k, v in node.kwargs.items() %}, {{ k }}={{ v }}{% endfor %})
-{% endif %}
-{% endfor %}
+def _require_workflow(state: WorkflowState) -> Workflow:
+    wf = state.get("wf")
+    if not isinstance(wf, Workflow):
+        raise ValueError(
+            "Workflow instance missing from state. "
+            "Invoke app with {'wf': workflow, 'input': '...'}"
+        )
+    return wf
 
-# Define agent nodes
-{% for node in nodes %}
-{% if node.type == "AgentNode" %}
-def {{ node.var_name }}_node(state: WorkflowState) -> WorkflowState:
-    agent = {{ node.var_name }}
-    user_input = state["messages"][-1]["content"] if state["messages"] else ""
-    response = agent.execute(context=user_input)
 
-    new_message = {"role": "assistant", "content": response.content}
-    state["messages"].append(new_message)
+def _serialize_agent_states(wf: Workflow) -> Dict[str, Dict[str, Any]]:
+    serialized: Dict[str, Dict[str, Any]] = {}
+    for agent_name, agent_state in wf.agent_states.items():
+        serialized[agent_name] = {
+            "call_count": agent_state.call_count,
+            "total_latency": agent_state.total_latency,
+            "total_memory": agent_state.total_memory,
+            "history": [
+                {"role": msg.role, "content": msg.content}
+                for msg in agent_state.history
+            ],
+        }
+    return serialized
 
-    {% if enable_profiling %}
-    # Update profiling data
-    if "{{ node.var_name }}" not in profiling_data:
-        profiling_data["{{ node.var_name }}"] = {"calls": 0, "latency": 0.0, "memory": 0.0}
-    profiling_data["{{ node.var_name }}"]["calls"] += 1
-    # Add latency/memory tracking here
-    {% endif %}
 
+def _resolve_input(state: WorkflowState) -> Any:
+    raw_input = state.get("input")
+    if raw_input is not None:
+        return raw_input
+
+    messages = state.get("messages", [])
+    if messages:
+        return messages[-1].get("content", "")
+    return ""
+
+
+def _build_eval_env(state: WorkflowState, extra: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    env: Dict[str, Any] = {
+        "__builtins__": SAFE_BUILTINS,
+        "wf": _require_workflow(state),
+    }
+    env.update(state.get("locals", {}))
+    if extra:
+        env.update(extra)
+    return env
+
+
+def _eval_expr(expr: str, state: WorkflowState, extra: Dict[str, Any] | None = None) -> Any:
+    return eval(expr, _build_eval_env(state, extra), {})
+
+
+def _sync_locals_from_env(state: WorkflowState, env: Dict[str, Any]) -> None:
+    reserved = {"__builtins__", "wf", "__value__"}
+    locals_state = state.setdefault("locals", {})
+    for key, value in env.items():
+        if key not in reserved:
+            locals_state[key] = value
+
+
+def _assign_target(state: WorkflowState, target_expr: str, value: Any) -> None:
+    if target_expr.isidentifier():
+        state.setdefault("locals", {})[target_expr] = value
+        return
+
+    env = _build_eval_env(state, {"__value__": value})
+    exec(f"{target_expr} = __value__", env, env)
+    _sync_locals_from_env(state, env)
+
+
+def _apply_augassign(state: WorkflowState, target_expr: str, op_name: str, value: Any) -> None:
+    operator = AUGASSIGN_OPERATORS.get(op_name)
+    if operator is None:
+        raise ValueError(f"Unsupported augmented assignment operator: {op_name}")
+
+    if target_expr.isidentifier():
+        current = state.setdefault("locals", {}).get(target_expr)
+        env = _build_eval_env(state, {"__current__": current, "__value__": value})
+        state["locals"][target_expr] = eval(f"__current__ {operator} __value__", env, {})
+        return
+
+    env = _build_eval_env(state, {"__value__": value})
+    exec(f"{target_expr} {operator}= __value__", env, env)
+    _sync_locals_from_env(state, env)
+
+
+def _apply_accessor(result: Any, accessor: List[Dict[str, str]]) -> Any:
+    current = result
+    for step in accessor:
+        if step["kind"] == "attr":
+            current = getattr(current, step["value"])
+        elif step["kind"] == "subscript":
+            current = current[eval(step["value"], {"__builtins__": SAFE_BUILTINS}, {})]
+    return current
+
+
+def _assign_call_result(state: WorkflowState, stmt: Dict[str, Any], result: Any) -> Any:
+    transformed = result
+    accessor = stmt.get("result_accessor", [])
+    if accessor:
+        transformed = _apply_accessor(result, accessor)
+
+    assign_to = stmt.get("assign_to")
+    assign_target_expr = stmt.get("assign_target_expr")
+    if assign_to:
+        state.setdefault("locals", {})[assign_to] = transformed
+    elif assign_target_expr:
+        _assign_target(state, assign_target_expr, transformed)
+
+    return transformed
+
+
+def _push_block(state: WorkflowState, statements: List[Dict[str, Any]]) -> None:
+    if not statements:
+        return
+    state.setdefault("frames", []).append({
+        "kind": "block",
+        "statements": statements,
+        "index": 0,
+    })
+
+
+def _break_loop(state: WorkflowState) -> None:
+    frames = state.setdefault("frames", [])
+    while frames:
+        frame = frames.pop()
+        if frame.get("kind") in {"for", "while"}:
+            return
+    state["done"] = True
+
+
+def _continue_loop(state: WorkflowState) -> None:
+    frames = state.setdefault("frames", [])
+    while frames and frames[-1].get("kind") == "block":
+        frames.pop()
+
+
+def _push_for_frame(state: WorkflowState, stmt: Dict[str, Any]) -> None:
+    iterable = list(_eval_expr(stmt["iter_expr"], state))
+    state.setdefault("frames", []).append({
+        "kind": "for",
+        "iter_var": stmt["iter_var"],
+        "items": iterable,
+        "index": 0,
+        "body": stmt.get("body", []),
+        "orelse": stmt.get("orelse", []),
+    })
+
+
+def _push_while_frame(state: WorkflowState, stmt: Dict[str, Any]) -> None:
+    loop_budget = state.get("loop_budget")
+    if loop_budget is None:
+        loop_budget = 2 if state.get("continue_loop") else 1
+        state["loop_budget"] = loop_budget
+
+    state.setdefault("frames", []).append({
+        "kind": "while",
+        "infinite": stmt["type"] == "infinite_loop",
+        "condition": stmt.get("condition"),
+        "body": stmt.get("body", []),
+        "orelse": stmt.get("orelse", []),
+        "remaining": loop_budget,
+    })
+
+
+def _route_dispatch(state: WorkflowState) -> str:
+    return state.get("pending_node", "stop")
+
+
+def dispatch_node(state: WorkflowState) -> WorkflowState:
+    wf = _require_workflow(state)
+    state.setdefault("locals", {})
+    state.setdefault("messages", [])
+    state.setdefault("frames", [])
+
+    if not state["frames"] and not state.get("done"):
+        _push_block(state, EXECUTION_LOGIC)
+
+    while True:
+        frames = state["frames"]
+        if not frames:
+            state["done"] = True
+            state["pending_node"] = "stop"
+            state["wf_state"] = dict(wf.state)
+            state["agent_states"] = _serialize_agent_states(wf)
+            return state
+
+        frame = frames[-1]
+        kind = frame["kind"]
+
+        if kind == "block":
+            if frame["index"] >= len(frame["statements"]):
+                frames.pop()
+                continue
+
+            stmt = frame["statements"][frame["index"]]
+            frame["index"] += 1
+            stmt_type = stmt["type"]
+
+            if stmt_type == "call":
+                func_name = stmt["call"]["func"]
+                if func_name == "input":
+                    _assign_call_result(state, stmt, _resolve_input(state))
+                    continue
+
+                if func_name.endswith(".send"):
+                    state["pending_call"] = stmt
+                    state["pending_node"] = "send_call"
+                    return state
+
+                if func_name.endswith(".execute"):
+                    state["pending_call"] = stmt
+                    base_name = func_name.rsplit(".", 1)[0]
+                    node_type = NODE_TYPES.get(base_name)
+                    if node_type == "AgentNode":
+                        state["pending_node"] = "send_call"
+                    else:
+                        state["pending_node"] = "service_call"
+                    return state
+
+            elif stmt_type == "assign":
+                _assign_target(state, stmt["target_expr"], _eval_expr(stmt["expr"], state))
+                continue
+
+            elif stmt_type == "augassign":
+                _apply_augassign(state, stmt["target_expr"], stmt["op"], _eval_expr(stmt["expr"], state))
+                continue
+
+            elif stmt_type == "if":
+                branch = stmt.get("body", []) if bool(_eval_expr(stmt["condition"], state)) else stmt.get("orelse", [])
+                _push_block(state, branch)
+                continue
+
+            elif stmt_type == "for_loop":
+                _push_for_frame(state, stmt)
+                continue
+
+            elif stmt_type in {"infinite_loop", "while_loop"}:
+                _push_while_frame(state, stmt)
+                continue
+
+            elif stmt_type == "break":
+                _break_loop(state)
+                continue
+
+            elif stmt_type == "continue":
+                _continue_loop(state)
+                continue
+
+        elif kind == "for":
+            if frame["index"] < len(frame["items"]):
+                item = frame["items"][frame["index"]]
+                frame["index"] += 1
+                _assign_target(state, frame["iter_var"], item)
+                _push_block(state, frame.get("body", []))
+                continue
+
+            frames.pop()
+            _push_block(state, frame.get("orelse", []))
+            continue
+
+        elif kind == "while":
+            if frame["infinite"]:
+                if frame["remaining"] <= 0:
+                    frames.pop()
+                    _push_block(state, frame.get("orelse", []))
+                    continue
+
+                frame["remaining"] -= 1
+                _push_block(state, frame.get("body", []))
+                continue
+
+            if bool(_eval_expr(frame["condition"], state)):
+                _push_block(state, frame.get("body", []))
+                continue
+
+            frames.pop()
+            _push_block(state, frame.get("orelse", []))
+            continue
+
+
+def send_call_node(state: WorkflowState) -> WorkflowState:
+    wf = _require_workflow(state)
+    stmt = state.pop("pending_call")
+    call = stmt["call"]
+    func_name = call["func"]
+
+    if func_name.endswith(".send"):
+        agent_name = _eval_expr(call["args"][0], state)
+        user_input = _eval_expr(call["args"][1], state) if len(call["args"]) > 1 else _resolve_input(state)
+        response = wf.send(str(agent_name), str(user_input))
+        message_agent = str(agent_name)
+    else:
+        base_name = func_name.rsplit(".", 1)[0]
+        runtime_name = NODE_RUNTIME_NAMES[base_name]
+        agent_state = wf.agent_states[str(runtime_name)]
+        context_value = _eval_expr(call["args"][0], state) if call["args"] else _resolve_input(state)
+        response = agent_state.agent.execute(context=context_value)
+        message_agent = str(runtime_name)
+
+    assigned_value = _assign_call_result(state, stmt, response)
+    state.setdefault("messages", []).append({
+        "role": "assistant",
+        "agent": message_agent,
+        "content": getattr(response, "content", str(assigned_value)),
+    })
+    state["last_agent"] = state["messages"][-1]["agent"]
+    state["last_response"] = getattr(response, "content", str(assigned_value))
+    state["wf_state"] = dict(wf.state)
+    state["agent_states"] = _serialize_agent_states(wf)
+    state["pending_node"] = "dispatch"
     return state
-{% endif %}
-{% endfor %}
 
-# Define service nodes
-{% for node in nodes %}
-{% if node.type == "ServiceNode" %}
-def {{ node.var_name }}_node(state: WorkflowState) -> WorkflowState:
-    service = {{ node.var_name }}
-    # Execute service and update state
-    result = service.execute({{ workflow_name }}, *state.get("service_args", []))
-    state["service_result"] = result
+
+def service_call_node(state: WorkflowState) -> WorkflowState:
+    wf = _require_workflow(state)
+    stmt = state.pop("pending_call")
+    call = stmt["call"]
+    base_name = call["func"].rsplit(".", 1)[0]
+    runtime_name = NODE_RUNTIME_NAMES[base_name]
+    service = wf.nodes[str(runtime_name)]
+
+    args = [_eval_expr(arg, state) for arg in call.get("args", [])]
+    kwargs = {key: _eval_expr(value, state) for key, value in call.get("kwargs", {}).items()}
+    result = service.execute(*args, **kwargs)
+
+    assigned_value = _assign_call_result(state, stmt, result)
+    state["last_response"] = str(assigned_value)
+    state["wf_state"] = dict(wf.state)
+    state["agent_states"] = _serialize_agent_states(wf)
+    state["pending_node"] = "dispatch"
     return state
-{% endif %}
-{% endfor %}
 
-# Define conditional routing
-def route_based_on_condition(state: WorkflowState) -> str:
-    # Implement routing logic based on execution_logic
-    {% for logic in execution_logic %}
-    {% if logic.type == "if" %}
-    if {{ logic.condition }}:
-        return "{{ logic.body[0].call.func if logic.body else 'default' }}"
-    {% endif %}
-    {% endfor %}
-    return "default"
 
-# Build the graph
-workflow = StateGraph(WorkflowState)
+def build_app():
+    graph = StateGraph(WorkflowState)
 
-# Add nodes
-{% for node in nodes %}
-workflow.add_node("{{ node.var_name }}", {{ node.var_name }}_node)
-{% endfor %}
+    graph.add_node("dispatch", dispatch_node)
+    graph.add_node("send_call", send_call_node)
+    graph.add_node("service_call", service_call_node)
 
-# Add edges based on execution logic
-{% for logic in execution_logic %}
-{% if logic.type == "for_loop" %}
-# Handle for loop logic
-workflow.add_edge("{{ logic.iter_expr.func }}", "{{ logic.body[0].call.func if logic.body else 'default' }}")
-{% elif logic.type == "if" %}
-workflow.add_conditional_edges("{{ logic.body[0].call.func if logic.body else 'start' }}", route_based_on_condition)
-{% endif %}
-{% endfor %}
+    graph.set_entry_point("dispatch")
 
-# Set entry point
-workflow.set_entry_point("{{ nodes[0].var_name if nodes else 'start' }}")
+    graph.add_conditional_edges(
+        "dispatch",
+        _route_dispatch,
+        {
+            "dispatch": "dispatch",
+            "send_call": "send_call",
+            "service_call": "service_call",
+            "stop": END,
+        },
+    )
 
-# Compile the graph
-app = workflow.compile()
+    graph.add_edge("send_call", "dispatch")
+    graph.add_edge("service_call", "dispatch")
+
+    return graph.compile()
+
+
+app = build_app()
+
 
 if __name__ == "__main__":
-    # Example usage
-    initial_state = {
-        "messages": [],
-        "current_agent": "",
-        "profiling_enabled": {{ "True" if enable_profiling else "False" }},
-        "profiling_data": profiling_data if {{ "True" if enable_profiling else "False" }} else {}
-    }
-
-    # Run the graph
-    result = app.invoke(initial_state)
-    print("Final state:", result)
+    print("Generated LangGraph app is ready.")
+    print("Invoke with state like: {'wf': workflow, 'input': 'hello', 'messages': [], 'loop_budget': 1}")
+    print("Set loop_budget > 1 to revisit loop bodies; continue_loop=True remains as compatibility shorthand.")

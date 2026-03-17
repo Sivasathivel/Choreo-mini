@@ -5,14 +5,110 @@ like LangGraph, CrewAI, or AutoGen using AST parsing and Jinja2 templates.
 """
 
 import argparse
-import ast
 import sys
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 import jinja2
 
 from choreo_mini.core.ast_parser import parse_workflow_code
+
+
+def _contains_logic_type(entries: List[Dict[str, Any]], kind: str) -> bool:
+    for entry in entries:
+        if entry.get("type") == kind:
+            return True
+
+        body = entry.get("body")
+        if isinstance(body, list) and _contains_logic_type(body, kind):
+            return True
+
+        orelse = entry.get("orelse")
+        if isinstance(orelse, list) and _contains_logic_type(orelse, kind):
+            return True
+
+    return False
+
+
+def _collect_calls(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    calls: List[Dict[str, Any]] = []
+    for entry in entries:
+        if entry.get("type") == "call":
+            calls.append(entry)
+
+        body = entry.get("body")
+        if isinstance(body, list):
+            calls.extend(_collect_calls(body))
+
+        orelse = entry.get("orelse")
+        if isinstance(orelse, list):
+            calls.extend(_collect_calls(orelse))
+
+    return calls
+
+
+def _build_render_data(workflow_data: Dict[str, Any], backend: str) -> Dict[str, Any]:
+    render_data = dict(workflow_data)
+
+    all_nodes = [
+        node for node in workflow_data.get("nodes", [])
+        if node.get("var_name")
+    ]
+    agent_nodes = [
+        node for node in all_nodes
+        if node.get("type") == "AgentNode"
+    ]
+    flattened_calls = _collect_calls(workflow_data.get("execution_logic", []))
+
+    render_data["all_nodes"] = all_nodes
+    render_data["agent_nodes"] = agent_nodes
+
+    if backend == "langgraph":
+        render_data["execution_logic_literal"] = repr(workflow_data.get("execution_logic", []))
+        render_data["has_conditionals"] = _contains_logic_type(workflow_data.get("execution_logic", []), "if")
+        render_data["has_loops"] = (
+            _contains_logic_type(workflow_data.get("execution_logic", []), "for_loop")
+            or _contains_logic_type(workflow_data.get("execution_logic", []), "infinite_loop")
+            or _contains_logic_type(workflow_data.get("execution_logic", []), "while_loop")
+        )
+
+    if backend in ("autogen", "crewai"):
+        send_calls: List[Dict[str, str]] = []
+        execute_calls: List[Dict[str, str]] = []
+        for call_entry in flattened_calls:
+            call = call_entry.get("call", {})
+            func_name = call.get("func", "")
+            args = call.get("args", [])
+
+            if func_name.endswith(".send"):
+                agent_expr = args[0] if args else "'assistant'"
+                message_expr = args[1] if len(args) > 1 else "'Hello'"
+                send_calls.append(
+                    {
+                        "func": func_name,
+                        "agent_expr": agent_expr,
+                        "message_expr": message_expr,
+                        "agent_expr_literal": repr(agent_expr),
+                        "message_expr_literal": repr(message_expr),
+                    }
+                )
+            elif func_name.endswith(".execute"):
+                message_expr = args[0] if args else "'Execute task'"
+                node_expr = func_name.rsplit(".", 1)[0]
+                execute_calls.append(
+                    {
+                        "func": func_name,
+                        "node_expr": node_expr,
+                        "node_expr_literal": repr(node_expr),
+                        "message_expr": message_expr,
+                        "message_expr_literal": repr(message_expr),
+                    }
+                )
+
+        render_data["send_calls"] = send_calls
+        render_data["execute_calls"] = execute_calls
+
+    return render_data
 
 
 def main():
@@ -44,7 +140,9 @@ def main():
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(template_dir))
     template = env.get_template("workflow.j2")
 
-    output_code = template.render(**workflow_data)
+    render_data = _build_render_data(workflow_data, args.backend)
+
+    output_code = template.render(**render_data)
 
     # Write output
     output_path = Path(args.output)
