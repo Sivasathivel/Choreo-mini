@@ -1,5 +1,5 @@
 Choreo-Mini Source License
-Version 1.1 (March 2026)
+Version 1.2 (March 2026)
 
 Copyright (c) 2026 Sivasathivel Kandasamy
 https://www.linkedin.com/in/sivasathivelkandasamy/
@@ -16,6 +16,10 @@ and documentation released under this license.
 "Derivative Work" means any modification of the Software, or any work based
 on the Software, where Software code is changed, extended, or incorporated in
 a way that creates a derived codebase.
+
+For clarity, merely importing, linking, calling public APIs, or configuring
+the Software without modifying its code does not by itself create a
+Derivative Work.
 
 "Larger Work" means software that uses, links to, or depends on the Software,
 but is otherwise independently developed and not itself a Derivative Work.
@@ -57,6 +61,20 @@ embedded library inside a Larger Work does not by itself constitute
 Productization, so long as the Software is not offered to third parties as a
 standalone product, API, plugin, extension, or hosted platform.
 
+Safe-harbor examples (permitted under this license):
+(a) using the Software in internal enterprise workflows, including commercial
+    business operations;
+(b) shipping a proprietary Larger Work that depends on the unmodified
+    Software, with required license notice retained;
+(c) using the Software in private build, testing, or deployment tooling.
+
+Examples of prohibited third-party Productization:
+(a) selling a modified fork, plugin, or extension based on the Software;
+(b) offering a paid hosted API or SaaS where users access Software or
+    Derivative Work functionality over a network;
+(c) charging for direct access to Software or Derivative Work capabilities,
+    even when bundled with other paid services.
+
 4. Copyleft for Distributed or Hosted Derivatives
 
 If you distribute a Derivative Work to third parties, or make a Derivative
@@ -73,12 +91,17 @@ Larger Work that is not derived from the Software.
 
 5. Citation and Attribution
 
-Any public repository, documentation site, demo, benchmark publication, or
-public-facing deployment that uses the Software or a Derivative Work must
+Any public materials or user-facing interface that references, demonstrates,
+or provides access to software using the Software or a Derivative Work must
 include visible attribution containing at least:
 - Project: Choreo-Mini
 - Author: Sivasathivel Kandasamy
 - Source: https://github.com/Sivasathivel/Choreo-mini
+
+Examples include public repositories, documentation sites, demo pages,
+benchmark publications, product websites, and service UI pages. Backend-only
+private deployments with no public-facing materials are not required to
+display attribution.
 
 6. Contributions and Relicensing Rights
 
