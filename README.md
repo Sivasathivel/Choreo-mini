@@ -178,7 +178,18 @@ CI runs the full regression suite against Python 3.10, 3.11, and 3.12 on every p
 
 ## License
 
-This project is released under the [Choreo-Mini Community License](LICENSE).
+This project is released under the [Choreo-Mini Source License](LICENSE).
 
-Key terms: derivatives must remain open source; contributors waive ownership claims;
-the author reserves the right to relicense future versions.
+**What is allowed:**
+- Use choreo-mini as a library or dependency inside any project, including
+    commercial applications and internal enterprise deployments — no restriction.
+- Modify the source and contribute back.
+
+**What is not allowed:**
+- Building and selling a product, plugin, extension, or SaaS where
+    choreo-mini is the core value being offered — unless you are the author.
+- Distributing a closed-source derivative.
+
+**Other terms:** public use requires citation; contributors grant the author
+relicensing rights; the author reserves the right to publish enterprise/
+commercial editions. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution terms.
