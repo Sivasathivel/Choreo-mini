@@ -1,282 +1,125 @@
 Choreo-Mini Source License
-Version 1.0 (March 2026)
+Version 1.1 (March 2026)
 
 Copyright (c) 2026 Sivasathivel Kandasamy
 https://www.linkedin.com/in/sivasathivelkandasamy/
 
-This license grants broad rights to use Choreo-Mini freely — including
-inside commercial projects — but restricts building commercial products
-or services where Choreo-Mini itself is the thing being sold.
+This license allows broad use of Choreo-Mini, including commercial use as a
+library or dependency, while restricting third-party productization of
+Choreo-Mini itself.
 
-───────────────────────────────────────────────────────────────────────
-DEFINITIONS
-───────────────────────────────────────────────────────────────────────
+1. Definitions
 
-"Software" means this project, its source code, documentation, and
-    associated files.
+"Software" means this project, including its source code, build artifacts,
+and documentation released under this license.
 
-"Derivative Work" means any modified version, adaptation, or work that
-    is substantially based on or incorporates the Software.
+"Derivative Work" means any modification of the Software, or any work based
+on the Software, where Software code is changed, extended, or incorporated in
+a way that creates a derived codebase.
 
-"Productize" means to (a) sell, license, or sublicense the Software or
-    a Derivative Work as a standalone product, plugin, or extension, or
-    (b) offer a hosted or managed service to third parties where the
-    primary value delivered is the functionality of the Software or a
-    Derivative Work.
+"Larger Work" means software that uses, links to, or depends on the Software,
+but is otherwise independently developed and not itself a Derivative Work.
 
-"Internal Use" means use solely within your own organization, where
-    the Software's functionality is not offered as a service to external
-    third parties.
+"Productize" means, for third parties, to do any of the following with the
+Software or a Derivative Work:
+(a) sell, license, or sublicense it as a product, plugin, extension, toolkit,
+    model service, or API offering;
+(b) offer it as a hosted or managed service (including SaaS) where users
+    access its functionality over a network;
+(c) provide paid access to the Software or a Derivative Work, including when
+    bundled with other services.
 
-───────────────────────────────────────────────────────────────────────
-PERMITTED USE
-───────────────────────────────────────────────────────────────────────
+"Internal Use" means use within your own legal entity and its controlled
+entities, where no external party receives direct access to the Software or a
+Derivative Work as a standalone offering.
 
-Subject to the conditions below, any person is free to:
+2. License Grant
 
-    • Use the Software as a library, dependency, or tool within any
-        project — commercial or non-commercial — including large-scale
-        internal deployments.
-    • Copy, modify, and create Derivative Works.
-    • Distribute the Software or Derivative Works for non-commercial
-        purposes, provided conditions below are met.
-    • Deploy the Software internally, including inside revenue-generating
-        applications, without restriction.
+Subject to compliance with this license, you are granted a non-exclusive,
+worldwide, royalty-free right to:
+(a) use, run, and reproduce the Software for any purpose, including commercial
+    Internal Use;
+(b) modify the Software and create Derivative Works;
+(c) use the Software inside Larger Works, including proprietary applications;
+(d) distribute unmodified copies of the Software, provided this license and
+    attribution notices are included.
 
-───────────────────────────────────────────────────────────────────────
-CONDITIONS
-───────────────────────────────────────────────────────────────────────
+3. Productization Restriction
 
-1.  No Third-Party Productization. You may not Productize the Software
-        or any Derivative Work. This restriction does not apply to the
-        original author (Sivasathivel Kandasamy), who retains exclusive
-        rights to commercialize the Software in any form.
+Except for the original author (Sivasathivel Kandasamy), no person or entity
+may Productize the Software or any Derivative Work under this license.
 
-2.  Copyleft on Distribution. If you distribute the Software or a
-        Derivative Work to third parties — in source or binary form — you
-        must release the complete corresponding source code under this same
-        license. You may not distribute a closed-source Derivative Work.
+This license does not provide a case-by-case approval or exception process for
+third-party Productization.
 
-3.  Citation and Attribution. Any public use, open-source repository,
-        documentation site, demo, or deployed service that uses the Software
-        must include a visible citation:
-            Project : Choreo-Mini
-            Author  : Sivasathivel Kandasamy
-            Source  : https://github.com/Sivasathivel/Choreo-mini
-        For academic or technical publications, include this citation in
-        the references or acknowledgements section.
+Clarification: using the Software as an internal dependency, build tool, or
+embedded library inside a Larger Work does not by itself constitute
+Productization, so long as the Software is not offered to third parties as a
+standalone product, API, plugin, extension, or hosted platform.
 
-4.  Contributor Rights Grant. By submitting a contribution (pull
-        request, patch, or code change) for inclusion in this project, you
-        irrevocably grant the author (Sivasathivel Kandasamy) a perpetual,
-        worldwide, royalty-free right to use, modify, sublicense, and
-        relicense those contributions, including in future commercial or
-        enterprise editions of the Software. You retain attribution credit
-        and represent that you have the right to submit the contribution.
+4. Copyleft for Distributed or Hosted Derivatives
 
-5.  Author Reserved Rights. The author exclusively reserves the right
-        to Productize the Software, publish dual-licensed or enterprise
-        editions, and modify these license terms for future versions.
-        These reserved rights do not retroactively revoke rights already
-        granted to recipients of previously distributed versions that
-        remain in compliance with this license.
+If you distribute a Derivative Work to third parties, or make a Derivative
+Work available to third parties over a network (for example as a hosted API or
+service), you must:
+(a) provide the complete corresponding source code of that Derivative Work;
+(b) license that Derivative Work under this same license;
+(c) include this license text and preserve copyright notices;
+(d) clearly mark modified files.
 
-───────────────────────────────────────────────────────────────────────
-NO WARRANTY
-───────────────────────────────────────────────────────────────────────
+Scope limitation: this clause applies to the Software and Derivative Work
+portions only. It does not require disclosure of independent source code in a
+Larger Work that is not derived from the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
+5. Citation and Attribution
 
-───────────────────────────────────────────────────────────────────────
-TERMINATION
-───────────────────────────────────────────────────────────────────────
+Any public repository, documentation site, demo, benchmark publication, or
+public-facing deployment that uses the Software or a Derivative Work must
+include visible attribution containing at least:
+- Project: Choreo-Mini
+- Author: Sivasathivel Kandasamy
+- Source: https://github.com/Sivasathivel/Choreo-mini
 
-Rights granted under this license terminate automatically upon any
-material breach. Rights may be reinstated only by written notice from
-the author.
+6. Contributions and Relicensing Rights
 
-"You" (or "Your") shall mean an individual or Legal Entity
-exercising permissions granted by this License.
+By submitting any contribution for inclusion in this project (including pull
+requests, patches, or code changes), you agree that:
+(a) your contribution may be distributed under this license; and
+(b) you grant the author a perpetual, worldwide, irrevocable, royalty-free
+    right to use, modify, sublicense, and relicense your contribution,
+    including in future dual-licensed, commercial, or enterprise editions.
 
-"Source" form shall mean the preferred form for making modifications,
-including but not limited to software source code, documentation
-source, and configuration files.
+You represent that you have the legal right to submit the contribution under
+these terms.
 
-"Object" form shall mean any form resulting from mechanical
-transformation or translation of a Source form, including but
-not limited to compiled object code, generated documentation,
-and conversions to other media types.
+7. Patent and Trademark
 
-"Work" shall mean the work of authorship, whether in Source or
-Object form, made available under the License, as indicated by a
-copyright notice that is included in or attached to the work
-(an example is provided in the Appendix below).
+Each contributor grants a non-exclusive, royalty-free patent license for patent
+claims necessarily infringed by their contribution as included in the Software.
+No trademark rights are granted by this license.
 
-"Derivative Works" shall mean any work, whether in Source or Object
-form, that is based on (or derived from) the Work and for which the
-editorial revisions, annotations, elaborations, or other modifications
-represent, as a whole, an original work of authorship. For the purposes
-of this License, Derivative Works shall not include works that remain
-separable from, or merely link (or bind by name) to the interfaces of,
-the Work and Derivative Works thereof.
+8. Reserved Author Rights and Future Licensing
 
-"Contribution" shall mean any work of authorship, including
-the original version of the Work and any modifications or additions
-to that Work or Derivative Works thereof, that is intentionally
-submitted to Licensor for inclusion in the Work by the copyright owner
-or by an individual or Legal Entity authorized to submit on behalf of
-the copyright owner. For the purposes of this definition, "submitted"
-means any form of electronic, verbal, or written communication sent
-to the Licensor or its representatives, including but not limited to
-communication on electronic mailing lists, source code control systems,
-and issue tracking systems that are managed by, or on behalf of, the
-Licensor for the purpose of discussing and improving the Work, but
-excluding communication that is conspicuously marked or otherwise
-designated in writing by the copyright owner as "Not a Contribution."
+The author reserves the exclusive right to:
+(a) publish enterprise, dual-licensed, or otherwise differently licensed
+    future versions; and
+(b) modify license terms for future releases.
 
-"Contributor" shall mean Licensor and any individual or Legal Entity
-on behalf of whom a Contribution has been received by Licensor and
-subsequently incorporated within the Work.
+Rights granted for previously released versions are not retroactively revoked
+for recipients who remain in compliance with the license applicable to those
+versions.
 
-2. Grant of Copyright License. Subject to the terms and conditions of
-this License, each Contributor hereby grants to You a perpetual,
-worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-copyright license to reproduce, prepare Derivative Works of,
-publicly display, publicly perform, sublicense, and distribute the
-Work and such Derivative Works in Source or Object form.
+9. Disclaimer of Warranty and Limitation of Liability
 
-3. Grant of Patent License. Subject to the terms and conditions of
-this License, each Contributor hereby grants to You a perpetual,
-worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-(except as stated in this section) patent license to make, have made,
-use, offer to sell, sell, import, and otherwise transfer the Work,
-where such license applies only to those patent claims licensable
-by such Contributor that are necessarily infringed by their
-Contribution(s) alone or by combination of their Contribution(s)
-with the Work to which such Contribution(s) was submitted. If You
-institute patent litigation against any entity (including a
-cross-claim or counterclaim in a lawsuit) alleging that the Work
-or a Contribution incorporated within the Work constitutes direct
-or contributory patent infringement, then any patent licenses
-granted to You under this License for that Work shall terminate
-as of the date such litigation is filed.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR OR
+CONTRIBUTORS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-4. Redistribution. You may reproduce and distribute copies of the
-Work or Derivative Works thereof in any medium, with or without
-modifications, and in Source or Object form, provided that You
-meet the following conditions:
+10. Termination
 
-(a) You must give any other recipients of the Work or
-Derivative Works a copy of this License; and
-
-(b) You must cause any modified files to carry prominent notices
-stating that You changed the files; and
-
-(c) You must retain, in the Source form of any Derivative Works
-that You distribute, all copyright, patent, trademark, and
-attribution notices from the Source form of the Work,
-excluding those notices that do not pertain to any part of
-the Derivative Works; and
-
-(d) If the Work includes a "NOTICE" text file as part of its
-distribution, then any Derivative Works that You distribute must
-include a readable copy of the attribution notices contained
-within such NOTICE file, excluding those notices that do not
-pertain to any part of the Derivative Works, in at least one
-of the following places: within a NOTICE text file distributed
-as part of the Derivative Works; within the Source form or
-documentation, if provided along with the Derivative Works; or,
-within a display generated by the Derivative Works, if and
-wherever such third-party notices normally appear. The contents
-of the NOTICE file are for informational purposes only and
-do not modify the License. You may add Your own attribution
-notices within Derivative Works that You distribute, alongside
-or as an addendum to the NOTICE text from the Work, provided
-that such additional attribution notices cannot be construed
-as modifying the License.
-
-You may add Your own copyright statement to Your modifications and
-may provide additional or different license terms and conditions
-for use, reproduction, or distribution of Your modifications, or
-for any such Derivative Works as a whole, provided Your use,
-reproduction, and distribution of the Work otherwise complies with
-the conditions stated in this License.
-
-5. Submission of Contributions. Unless You explicitly state otherwise,
-any Contribution intentionally submitted for inclusion in the Work
-by You to the Licensor shall be under the terms and conditions of
-this License, without any additional terms or conditions.
-Notwithstanding the above, nothing herein shall supersede or modify
-the terms of any separate license agreement you may have executed
-with Licensor regarding such Contributions.
-
-6. Trademarks. This License does not grant permission to use the trade
-names, trademarks, service marks, or product names of the Licensor,
-except as required for reasonable and customary use in describing the
-origin of the Work and reproducing the content of the NOTICE file.
-
-7. Disclaimer of Warranty. Unless required by applicable law or
-agreed to in writing, Licensor provides the Work (and each
-Contributor provides its Contributions) on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-implied, including, without limitation, any warranties or conditions
-of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
-PARTICULAR PURPOSE. You are solely responsible for determining the
-appropriateness of using or redistributing the Work and assume any
-risks associated with Your exercise of permissions under this License.
-
-8. Limitation of Liability. In no event and under no legal theory,
-whether in tort (including negligence), contract, or otherwise,
-unless required by applicable law (such as deliberate and grossly
-negligent acts) or agreed to in writing, shall any Contributor be
-liable to You for damages, including any direct, indirect, special,
-incidental, or consequential damages of any character arising as a
-result of this License or out of the use or inability to use the
-Work (including but not limited to damages for loss of goodwill,
-work stoppage, computer failure or malfunction, or any and all
-other commercial damages or losses), even if such Contributor
-has been advised of the possibility of such damages.
-
-9. Accepting Warranty or Additional Liability. While redistributing
-the Work or Derivative Works thereof, You may choose to offer,
-and charge a fee for, acceptance of support, warranty, indemnity,
-or other liability obligations and/or rights consistent with this
-License. However, in accepting such obligations, You may act only
-on Your own behalf and on Your sole responsibility, not on behalf
-of any other Contributor, and only if You agree to indemnify,
-defend, and hold each Contributor harmless for any liability
-incurred by, or claims asserted against, such Contributor by reason
-of your accepting any such warranty or additional liability.
-
-END OF TERMS AND CONDITIONS
-
-APPENDIX: How to apply the Apache License to your work.
-
-To apply the Apache License to your work, attach the following
-boilerplate notice, with the fields enclosed by brackets "[]"
-replaced with your own identifying information. (Do not include
-the brackets!)  The text should be enclosed in the appropriate
-comment syntax for the file format. We also recommend that a
-file or class name and description of purpose be included on the
-same "printed page" as the copyright notice for easier
-identification within third-party archives.
-
-Copyright [yyyy] [name of copyright owner]
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+Any material breach of this license automatically terminates rights granted
+under it. Rights may be reinstated only by explicit written notice from the
+author.

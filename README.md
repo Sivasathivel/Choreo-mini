@@ -184,11 +184,14 @@ This project is released under the [Choreo-Mini Source License](LICENSE).
 - Use choreo-mini as a library or dependency inside any project, including
     commercial applications and internal enterprise deployments — no restriction.
 - Modify the source and contribute back.
+- Keep your larger application closed source when it only depends on
+    choreo-mini and is not itself a derivative of choreo-mini.
 
 **What is not allowed:**
 - Building and selling a product, plugin, extension, or SaaS where
-    choreo-mini is the core value being offered — unless you are the author.
-- Distributing a closed-source derivative.
+    choreo-mini is the core value being offered by a third party.
+- Distributing or hosting a modified derivative of choreo-mini without
+    releasing the derivative source under the same license.
 
 **Other terms:** public use requires citation; contributors grant the author
 relicensing rights; the author reserves the right to publish enterprise/
