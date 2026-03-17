@@ -113,32 +113,6 @@ class LLM(ABC):
         return provider_cls(**kwargs)
 
 
-    def chat(self, messages: list["Message"], **kwargs: Any) -> "Message":
-        """Run a multi‑turn chat interaction.
-
-        The return value is a single response message; callers may inspect
-        ``role`` to decide how to handle the result.  ``kwargs`` are again
-        passed to provider-specific APIs (temperature, stop sequences,
-        etc.).
-        """
-        # simple default: concatenate user messages into a single prompt.
-        prompt = "\n".join(m.content for m in messages if m.role == "user")
-        return Message(role="assistant", content=self.generate(prompt, **kwargs))
-
-    @classmethod
-    def create(cls, provider: str, **kwargs: Any) -> "LLM":
-        """Factory that returns an LLM instance for the named provider.
-
-        Example::
-
-            llm = LLM.create("openai", api_key="...")
-        """
-        provider_cls = _LLM_REGISTRY.get(provider.lower())
-        if provider_cls is None:
-            raise ValueError(f"Unknown LLM provider '{provider}'")
-        return provider_cls(**kwargs)
-
-
 @register_llm("openai")
 class OpenAI(LLM):
     """Wrapper around OpenAI's completion/chat APIs.

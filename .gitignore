@@ -1,0 +1,35 @@
+# Python bytecode — machine-specific, auto-generated on import; never commit
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Build and distribution artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+wheels/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Test and coverage output
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# IDE
+.vscode/settings.json
+.idea/
+*.code-workspace
+
+# CLI-generated conversion outputs — users run `choreo_mini -f ... -o output/`
+output/*.py
+
+# macOS filesystem artifacts
+.DS_Store

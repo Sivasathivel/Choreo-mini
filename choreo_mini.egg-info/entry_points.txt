@@ -1,3 +1,0 @@
-[console_scripts]
-choreo-mini = choreo_mini.cli:main
-choreo_mini = choreo_mini.cli:main

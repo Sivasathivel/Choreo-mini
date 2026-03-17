@@ -1,40 +1,47 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "choreo-mini"
 version = "0.1.0"
-description = "A short description of your package"
+description = "A lightweight Python meta-framework for building, experimenting with, and orchestrating LLM-based agents across multiple runtimes."
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.10"
+license-files = ["LICENSE"]
 authors = [
-    { name = "Your Name", email = "your.email@example.com" },
+    { name = "Sivasathivel Kandasamy" },
 ]
-license = { text = "MIT" }
 classifiers = [
+    "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-keywords = ["choreo", "example"]
+keywords = ["llm", "agents", "orchestration", "langgraph", "crewai", "autogen", "ai", "workflow", "agentic"]
 dependencies = ["jinja2>=3.0.0"]
 
 [project.scripts]
-choreo-mini = "choreo_mini.cli:main"
 choreo_mini = "choreo_mini.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/sivasathivelkandasamy/choreo-mini"
-Source = "https://github.com/sivasathivelkandasamy/choreo-mini"
+Homepage = "https://github.com/Sivasathivel/Choreo-mini"
+Source = "https://github.com/Sivasathivel/Choreo-mini"
+"Author LinkedIn" = "https://www.linkedin.com/in/sivasathivelkandasamy/"
 
 [project.optional-dependencies]
-
 dev = [
-    "pytest>=6.0",
+    "pytest>=7.0",
+    "langgraph",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["choreo_mini", "choreo_mini.*"]
+
+[tool.setuptools.package-data]
+"choreo_mini" = ["templates/**/*.j2"]

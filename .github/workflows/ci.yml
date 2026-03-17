@@ -10,21 +10,28 @@ jobs:
   tests:
     runs-on: ubuntu-latest
 
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
-          pip install pytest langgraph jinja2
+          pip install -e ".[dev]"
+
+      - name: Verify templates are included in package
+        run: python -c "import choreo_mini; import importlib.resources; print('package OK')"
 
       - name: Run regression tests
         run: |
-          pytest -q tests/test_langgraph_conversion.py tests/test_backend_templates.py
+          pytest -q tests/
