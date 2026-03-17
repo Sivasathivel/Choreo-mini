@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "A lightweight Python meta-framework for building, experimenting with, and orchestrating LLM-based agents across multiple runtimes."
 readme = "README.md"
 requires-python = ">=3.10"
-license-files = ["LICENSE"]
+license = { text = "Choreo-Mini Source License 1.2" }
 authors = [
     { name = "Sivasathivel Kandasamy" },
 ]
