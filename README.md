@@ -45,10 +45,10 @@ pip install choreo-mini
 
 ## Quick Start
 
-**Define your workflow once in plain Python:**
+### 1) Define your workflow once in plain Python
 
 ```python
-# examples/my_workflow.py
+# my_workflow.py
 from choreo_mini.core.workflow import Workflow
 from choreo_mini.core.nodes import AgentNode, ServiceNode
 
@@ -69,20 +69,34 @@ def main():
         print(response.content)
 ```
 
-**Compile to any supported runtime:**
+### 2) Convert your workflow to each backend
 
 ```bash
 # to LangGraph
-choreo_mini -f examples/my_workflow.py -b langgraph -o output/langgraph_output.py
+choreo_mini -f my_workflow.py -b langgraph -o output/langgraph_output.py
 
 # to CrewAI
-choreo_mini -f examples/my_workflow.py -b crewai  -o output/crewai_output.py
+choreo_mini -f my_workflow.py -b crewai -o output/crewai_output.py
 
 # to AutoGen
-choreo_mini -f examples/my_workflow.py -b autogen -o output/autogen_output.py
+choreo_mini -f my_workflow.py -b autogen -o output/autogen_output.py
 ```
 
-**Run the generated LangGraph app directly:**
+### 3) Convert bundled repository examples (if you cloned this repo)
+
+```bash
+# minimal loop example
+choreo_mini -f examples/foo.py -b langgraph -o output/foo_langgraph_output.py
+choreo_mini -f examples/foo.py -b crewai -o output/foo_crewai_output.py
+choreo_mini -f examples/foo.py -b autogen -o output/foo_autogen_output.py
+
+# richer triage/routing example
+choreo_mini -f examples/foo2.py -b langgraph -o output/foo2_langgraph_output.py
+choreo_mini -f examples/foo2.py -b crewai -o output/foo2_crewai_output.py
+choreo_mini -f examples/foo2.py -b autogen -o output/foo2_autogen_output.py
+```
+
+### 4) Run a generated LangGraph app directly
 
 ```python
 from output.langgraph_output import app
