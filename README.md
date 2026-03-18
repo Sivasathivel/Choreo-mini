@@ -82,18 +82,19 @@ choreo_mini -f my_workflow.py -b crewai -o output/crewai_output.py
 choreo_mini -f my_workflow.py -b autogen -o output/autogen_output.py
 ```
 
-### 3) Convert bundled repository examples (if you cloned this repo)
+### 3) Convert the bundled complete example (recommended)
 
 ```bash
-# minimal loop example
-choreo_mini -f examples/foo.py -b langgraph -o output/foo_langgraph_output.py
-choreo_mini -f examples/foo.py -b crewai -o output/foo_crewai_output.py
-choreo_mini -f examples/foo.py -b autogen -o output/foo_autogen_output.py
-
-# richer triage/routing example
+# examples/foo2.py includes routing, specialist selection, review flow, and looped batch handling
 choreo_mini -f examples/foo2.py -b langgraph -o output/foo2_langgraph_output.py
 choreo_mini -f examples/foo2.py -b crewai -o output/foo2_crewai_output.py
 choreo_mini -f examples/foo2.py -b autogen -o output/foo2_autogen_output.py
+```
+
+Optional minimal smoke test (`examples/foo.py`):
+
+```bash
+choreo_mini -f examples/foo.py -b langgraph -o output/foo_langgraph_output.py
 ```
 
 ### 4) Run a generated LangGraph app directly
