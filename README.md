@@ -35,6 +35,22 @@ Choreo-Mini is an actively developed prototype. The **LangGraph** backend is the
 
 ---
 
+## Roadmap
+
+Near-term next steps:
+
+- Build **MCP server support** so choreo-mini workflows can be exposed as tools/resources/prompts via Model Context Protocol.
+- Add **A2A (agent-to-agent) support** for explicit handoffs, delegation, and structured cross-agent messaging.
+- Introduce first-class **tool usage orchestration** (typed tool schemas, argument validation, retries/timeouts, and tool-call tracing).
+- Bring **CrewAI** and **AutoGen** behavior closer to LangGraph parity for routing, loop handling, and workflow state transitions.
+- Replace provider stubs with production-ready adapters for OpenAI, Anthropic, and Gemini in `LLM.generate()`.
+- Expand AST parser coverage for more real-world Python patterns (deeper branching, loop variants, and service composition).
+- Add backend snapshot tests and regression fixtures around `examples/foo2.py` plus additional realistic workflows.
+- Improve CLI ergonomics with clearer conversion diagnostics and optional inspection output for parsed workflow data.
+- Publish reference demos and backend comparison benchmarks built from the same source workflow.
+
+---
+
 ## Installation
 
 ```bash
