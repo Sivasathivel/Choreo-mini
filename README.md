@@ -4,7 +4,7 @@
 
 Modern agent frameworks — LangGraph, CrewAI, AutoGen — each solve similar orchestration problems but introduce fragmented abstractions and steep learning curves. Choreo-Mini provides a Python-native developer experience that allows engineers to prototype agent workflows quickly while retaining the flexibility to run them on different orchestration runtimes.
 
-Instead of forcing developers to commit to a single framework, Choreo-Mini acts as an orchestration meta-layer: you express your workflow once in plain Python, and it compiles it to your target runtime.
+Instead of forcing developers to commit to a single framework, Choreo-Mini acts as an orchestration meta-layer: you express your workflow once in plain Python, and it compiles it to your target runtime, if needed.
 
 ---
 
