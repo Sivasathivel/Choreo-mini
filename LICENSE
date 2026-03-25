@@ -132,6 +132,22 @@ Rights granted for previously released versions are not retroactively revoked
 for recipients who remain in compliance with the license applicable to those
 versions.
 
+8A. Policy Files Incorporated by Reference
+
+In addition to the terms in this license, use of the Software and any
+Derivative Work is subject to the policy files listed below, each as updated
+by the author from time to time:
+(a) PROHIBITED_USES.md
+(b) EXCLUDED_ENTITIES.md
+
+The latest published versions of those files in the official repository are
+incorporated into this license by reference and are binding license
+conditions.
+
+Any use prohibited by PROHIBITED_USES.md, or any use by an entity listed in
+EXCLUDED_ENTITIES.md, is unlicensed under this license and constitutes a
+material breach for purposes of Termination.
+
 9. Disclaimer of Warranty and Limitation of Liability
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
