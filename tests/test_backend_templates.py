@@ -25,7 +25,8 @@ def _render_backend(example_name: str, backend: str) -> tuple[str, dict]:
 def test_autogen_template_renders_for_complex_workflow():
     rendered, render_data = _render_backend("foo2.py", "autogen")
 
-    assert "SEND_CALLS = [" in rendered
+    assert "EXECUTION_LOGIC = [" in rendered
+    assert "def kickoff(" in rendered
     assert len(render_data["send_calls"]) >= 4
     assert "{{" not in rendered
 

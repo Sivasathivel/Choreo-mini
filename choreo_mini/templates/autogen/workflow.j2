@@ -1,18 +1,74 @@
 """Generated AutoGen workflow from choreo-mini code."""
 
-from autogen import AssistantAgent, UserProxyAgent
-{% for imp in imports %}
-{{ imp }}
-{% endfor %}
+from typing import Any, Dict, List, TypedDict
 
-# Create agents
+from autogen import AssistantAgent, UserProxyAgent
+
+from choreo_mini.core.workflow import Workflow
+
+
+NODE_RUNTIME_NAMES = {
+{% for node in all_nodes %}
+    "{{ node.var_name }}": {{ node.runtime_name_expr }},
+{% endfor %}
+}
+
+
+NODE_TYPES = {
+{% for node in all_nodes %}
+    "{{ node.var_name }}": "{{ node.type }}",
+{% endfor %}
+}
+
+
+EXECUTION_LOGIC = {{ execution_logic_literal }}
+
+
+SAFE_BUILTINS = {
+    "all": all,
+    "any": any,
+    "bool": bool,
+    "dict": dict,
+    "enumerate": enumerate,
+    "float": float,
+    "int": int,
+    "len": len,
+    "list": list,
+    "max": max,
+    "min": min,
+    "range": range,
+    "set": set,
+    "str": str,
+    "sum": sum,
+    "tuple": tuple,
+}
+
+
+AUGASSIGN_OPERATORS = {
+    "Add": "+",
+    "Sub": "-",
+    "Mult": "*",
+    "Div": "/",
+    "FloorDiv": "//",
+    "Mod": "%",
+}
+
+
 {% for node in agent_nodes %}
 {{ node.var_name }} = AssistantAgent(
     name="{{ node.var_name }}",
     system_message={{ node.kwargs.get('system_prompt', node.kwargs.get('role', "'You are a helpful assistant.'")) }},
-    llm_config={"config_list": [{"model": "gpt-4", "api_key": "your-key"}]}
+    llm_config=False,
 )
 {% endfor %}
+
+
+AGENTS = [
+{% for node in agent_nodes %}
+    {{ node.var_name }},
+{% endfor %}
+]
+
 
 AGENT_REGISTRY = {
 {% for node in agent_nodes %}
@@ -21,55 +77,384 @@ AGENT_REGISTRY = {
 {% endfor %}
 }
 
-SEND_CALLS = [
-{% for call in send_calls %}
-    {
-        "agent_expr": {{ call.agent_expr_literal }},
-        "message_expr": {{ call.message_expr_literal }},
-    },
-{% endfor %}
-]
+
+class AutoGenWorkflowState(TypedDict, total=False):
+    wf: Any
+    input_queue: List[Any]
+    input: Any
+    continue_loop: bool
+    loop_budget: int
+    locals: Dict[str, Any]
+    frames: List[Dict[str, Any]]
+    messages: List[Dict[str, Any]]
+    last_response: str
+    last_agent: str
+    wf_state: Dict[str, Any]
+    agent_states: Dict[str, Dict[str, Any]]
+    done: bool
 
 
-def _resolve_agent(agent_expr: str):
-    key = str(agent_expr).strip().strip("\"'")
-    return AGENT_REGISTRY.get(key) or AGENT_REGISTRY.get(key.lower())
+def _require_workflow(state: AutoGenWorkflowState) -> Workflow:
+    wf = state.get("wf")
+    if not isinstance(wf, Workflow):
+        raise ValueError(
+            "Workflow instance missing. Call run(wf=workflow, inputs={...})"
+        )
+    return wf
 
 
-def _render_message(message_expr: str) -> str:
-    return f"Generated from expression: {message_expr}"
+def _serialize_agent_states(wf: Workflow) -> Dict[str, Dict[str, Any]]:
+    serialized: Dict[str, Dict[str, Any]] = {}
+    for agent_name, agent_state in wf.agent_states.items():
+        serialized[agent_name] = {
+            "call_count": agent_state.call_count,
+            "total_latency": agent_state.total_latency,
+            "total_memory": agent_state.total_memory,
+            "history": [
+                {"role": msg.role, "content": msg.content}
+                for msg in agent_state.history
+            ],
+        }
+    return serialized
 
-# Create user proxy
-user_proxy = UserProxyAgent(
-    name="user_proxy",
-    human_input_mode="NEVER",
-    max_consecutive_auto_reply=10,
-    is_termination_msg=lambda x: x.get("content", "").rstrip().endswith("TERMINATE"),
-    code_execution_config=False,
-)
 
-if __name__ == "__main__":
-    if not AGENT_REGISTRY:
-        print("No AgentNode declarations found for AutoGen conversion.")
-    elif not SEND_CALLS:
-        print("No wf.send calls were detected in execution logic.")
+def _normalize_input_queue(inputs: Any) -> List[Any]:
+    if inputs is None:
+        return []
+    if isinstance(inputs, dict):
+        if "input_queue" in inputs:
+            queue = inputs["input_queue"]
+            if isinstance(queue, list):
+                return list(queue)
+            return [queue]
+        if "input" in inputs:
+            return [inputs["input"]]
+        return []
+    if isinstance(inputs, (list, tuple)):
+        return list(inputs)
+    return [inputs]
+
+
+def _resolve_input(state: AutoGenWorkflowState) -> Any:
+    queue = state.setdefault("input_queue", [])
+    if queue:
+        value = queue.pop(0)
+        state["input"] = value
+        return value
+    return ""
+
+
+def _build_eval_env(state: AutoGenWorkflowState, extra: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    env: Dict[str, Any] = {
+        "__builtins__": SAFE_BUILTINS,
+        "wf": _require_workflow(state),
+    }
+    env.update(state.get("locals", {}))
+    if extra:
+        env.update(extra)
+    return env
+
+
+def _eval_expr(expr: str, state: AutoGenWorkflowState, extra: Dict[str, Any] | None = None) -> Any:
+    return eval(expr, _build_eval_env(state, extra), {})
+
+
+def _sync_locals_from_env(state: AutoGenWorkflowState, env: Dict[str, Any]) -> None:
+    reserved = {"__builtins__", "wf", "__value__"}
+    locals_state = state.setdefault("locals", {})
+    for key, value in env.items():
+        if key not in reserved:
+            locals_state[key] = value
+
+
+def _assign_target(state: AutoGenWorkflowState, target_expr: str, value: Any) -> None:
+    if target_expr.isidentifier():
+        state.setdefault("locals", {})[target_expr] = value
+        return
+    env = _build_eval_env(state, {"__value__": value})
+    exec(f"{target_expr} = __value__", env, env)
+    _sync_locals_from_env(state, env)
+
+
+def _apply_augassign(state: AutoGenWorkflowState, target_expr: str, op_name: str, value: Any) -> None:
+    operator = AUGASSIGN_OPERATORS.get(op_name)
+    if operator is None:
+        raise ValueError(f"Unsupported augmented assignment operator: {op_name}")
+    if target_expr.isidentifier():
+        current = state.setdefault("locals", {}).get(target_expr)
+        env = _build_eval_env(state, {"__current__": current, "__value__": value})
+        state["locals"][target_expr] = eval(f"__current__ {operator} __value__", env, {})
+        return
+    env = _build_eval_env(state, {"__value__": value})
+    exec(f"{target_expr} {operator}= __value__", env, env)
+    _sync_locals_from_env(state, env)
+
+
+def _apply_accessor(result: Any, accessor: List[Dict[str, str]]) -> Any:
+    current = result
+    for step in accessor:
+        if step["kind"] == "attr":
+            current = getattr(current, step["value"])
+        elif step["kind"] == "subscript":
+            current = current[eval(step["value"], {"__builtins__": SAFE_BUILTINS}, {})]
+    return current
+
+
+def _assign_call_result(state: AutoGenWorkflowState, stmt: Dict[str, Any], result: Any) -> Any:
+    transformed = result
+    accessor = stmt.get("result_accessor", [])
+    if accessor:
+        transformed = _apply_accessor(result, accessor)
+    assign_to = stmt.get("assign_to")
+    assign_target_expr = stmt.get("assign_target_expr")
+    if assign_to:
+        state.setdefault("locals", {})[assign_to] = transformed
+    elif assign_target_expr:
+        _assign_target(state, assign_target_expr, transformed)
+    return transformed
+
+
+def _push_block(state: AutoGenWorkflowState, statements: List[Dict[str, Any]]) -> None:
+    if not statements:
+        return
+    state.setdefault("frames", []).append({
+        "kind": "block",
+        "statements": statements,
+        "index": 0,
+    })
+
+
+def _break_loop(state: AutoGenWorkflowState) -> None:
+    frames = state.setdefault("frames", [])
+    while frames:
+        frame = frames.pop()
+        if frame.get("kind") in {"for", "while"}:
+            return
+    state["done"] = True
+
+
+def _continue_loop(state: AutoGenWorkflowState) -> None:
+    frames = state.setdefault("frames", [])
+    while frames and frames[-1].get("kind") == "block":
+        frames.pop()
+
+
+def _push_for_frame(state: AutoGenWorkflowState, stmt: Dict[str, Any]) -> None:
+    iterable = list(_eval_expr(stmt["iter_expr"], state))
+    state.setdefault("frames", []).append({
+        "kind": "for",
+        "iter_var": stmt["iter_var"],
+        "items": iterable,
+        "index": 0,
+        "body": stmt.get("body", []),
+        "orelse": stmt.get("orelse", []),
+    })
+
+
+def _push_while_frame(state: AutoGenWorkflowState, stmt: Dict[str, Any]) -> None:
+    loop_budget = state.get("loop_budget")
+    if loop_budget is None:
+        loop_budget = 2 if state.get("continue_loop") else 1
+        state["loop_budget"] = loop_budget
+    state.setdefault("frames", []).append({
+        "kind": "while",
+        "infinite": stmt["type"] == "infinite_loop",
+        "condition": stmt.get("condition"),
+        "body": stmt.get("body", []),
+        "orelse": stmt.get("orelse", []),
+        "remaining": loop_budget,
+    })
+
+
+def _execute_send(state: AutoGenWorkflowState, stmt: Dict[str, Any]) -> None:
+    wf = _require_workflow(state)
+    call = stmt["call"]
+    func_name = call["func"]
+
+    if func_name.endswith(".send"):
+        agent_name = str(_eval_expr(call["args"][0], state))
+        user_input = _eval_expr(call["args"][1], state) if len(call["args"]) > 1 else _resolve_input(state)
+        response = wf.send(agent_name, str(user_input))
+        assigned_value = _assign_call_result(state, stmt, response)
+        response_text = getattr(response, "content", str(assigned_value))
+        message_agent = agent_name
     else:
-        for index, call in enumerate(SEND_CALLS, start=1):
-            recipient = _resolve_agent(call["agent_expr"])
-            if recipient is None:
-                print(f"Skipping step {index}: unresolved agent expression {call['agent_expr']!r}")
+        base_name = func_name.rsplit(".", 1)[0]
+        runtime_name = str(NODE_RUNTIME_NAMES[base_name])
+        agent_state = wf.agent_states[runtime_name]
+        context_value = _eval_expr(call["args"][0], state) if call["args"] else _resolve_input(state)
+        response = agent_state.agent.execute(context=context_value)
+        assigned_value = _assign_call_result(state, stmt, response)
+        response_text = getattr(response, "content", str(assigned_value))
+        message_agent = runtime_name
+
+    state.setdefault("messages", []).append({
+        "role": "assistant",
+        "agent": message_agent,
+        "content": response_text,
+    })
+    state["last_agent"] = message_agent
+    state["last_response"] = response_text
+    state["wf_state"] = dict(wf.state)
+    state["agent_states"] = _serialize_agent_states(wf)
+
+
+def _execute_service(state: AutoGenWorkflowState, stmt: Dict[str, Any]) -> None:
+    wf = _require_workflow(state)
+    call = stmt["call"]
+    base_name = call["func"].rsplit(".", 1)[0]
+    runtime_name = str(NODE_RUNTIME_NAMES[base_name])
+    service = wf.nodes[runtime_name]
+    args = [_eval_expr(arg, state) for arg in call.get("args", [])]
+    kwargs = {key: _eval_expr(value, state) for key, value in call.get("kwargs", {}).items()}
+    result = service.execute(*args, **kwargs)
+    assigned_value = _assign_call_result(state, stmt, result)
+    state["last_response"] = str(assigned_value)
+    state["wf_state"] = dict(wf.state)
+    state["agent_states"] = _serialize_agent_states(wf)
+
+
+def _run_dispatch(state: AutoGenWorkflowState) -> AutoGenWorkflowState:
+    wf = _require_workflow(state)
+    state.setdefault("locals", {})
+    state.setdefault("messages", [])
+    state.setdefault("frames", [])
+
+    if not state["frames"] and not state.get("done"):
+        _push_block(state, EXECUTION_LOGIC)
+
+    while True:
+        frames = state["frames"]
+        if not frames:
+            state["done"] = True
+            state["wf_state"] = dict(wf.state)
+            state["agent_states"] = _serialize_agent_states(wf)
+            return state
+
+        frame = frames[-1]
+        kind = frame["kind"]
+
+        if kind == "block":
+            if frame["index"] >= len(frame["statements"]):
+                frames.pop()
                 continue
 
-            try:
-                response = user_proxy.initiate_chat(
-                    recipient,
-                    message=_render_message(call["message_expr"]),
-                )
-                print(f"Step {index} response:", response)
-            except Exception as exc:
-                print(f"Step {index} failed: {exc}")
+            stmt = frame["statements"][frame["index"]]
+            frame["index"] += 1
+            stmt_type = stmt["type"]
+
+            if stmt_type == "call":
+                func_name = stmt["call"]["func"]
+                if func_name == "input":
+                    _assign_call_result(state, stmt, _resolve_input(state))
+                    continue
+                if func_name.endswith(".send"):
+                    _execute_send(state, stmt)
+                    continue
+                if func_name.endswith(".execute"):
+                    base_name = func_name.rsplit(".", 1)[0]
+                    node_type = NODE_TYPES.get(base_name)
+                    if node_type == "AgentNode":
+                        _execute_send(state, stmt)
+                    else:
+                        _execute_service(state, stmt)
+                    continue
+
+            elif stmt_type == "assign":
+                _assign_target(state, stmt["target_expr"], _eval_expr(stmt["expr"], state))
+                continue
+
+            elif stmt_type == "augassign":
+                _apply_augassign(state, stmt["target_expr"], stmt["op"], _eval_expr(stmt["expr"], state))
+                continue
+
+            elif stmt_type == "if":
+                branch = stmt.get("body", []) if bool(_eval_expr(stmt["condition"], state)) else stmt.get("orelse", [])
+                _push_block(state, branch)
+                continue
+
+            elif stmt_type == "for_loop":
+                _push_for_frame(state, stmt)
+                continue
+
+            elif stmt_type in {"infinite_loop", "while_loop"}:
+                _push_while_frame(state, stmt)
+                continue
+
+            elif stmt_type == "break":
+                _break_loop(state)
+                continue
+
+            elif stmt_type == "continue":
+                _continue_loop(state)
+                continue
+
+        elif kind == "for":
+            if frame["index"] >= len(frame["items"]):
+                frames.pop()
+                _push_block(state, frame.get("orelse", []))
+                continue
+
+            item = frame["items"][frame["index"]]
+            frame["index"] += 1
+            _assign_target(state, frame["iter_var"], item)
+            _push_block(state, frame.get("body", []))
+            continue
+
+        elif kind == "while":
+            if frame["infinite"]:
+                if frame["remaining"] <= 0:
+                    frames.pop()
+                    _push_block(state, frame.get("orelse", []))
+                    continue
+                frame["remaining"] -= 1
+                _push_block(state, frame.get("body", []))
+                continue
+
+            if bool(_eval_expr(frame["condition"], state)):
+                _push_block(state, frame.get("body", []))
+                continue
+
+            frames.pop()
+            _push_block(state, frame.get("orelse", []))
+            continue
+
+
+def kickoff(
+    inputs: Dict[str, Any] | None = None,
+    *,
+    wf: Workflow | None = None,
+    continue_loop: bool = False,
+    loop_budget: int | None = None,
+) -> Dict[str, Any]:
+    runtime_inputs = inputs or {}
+    workflow = wf or runtime_inputs.get("wf")
+    state: AutoGenWorkflowState = {
+        "wf": workflow,
+        "input_queue": _normalize_input_queue(runtime_inputs),
+        "continue_loop": continue_loop,
+        "messages": list(runtime_inputs.get("messages", [])),
+    }
+    if loop_budget is not None:
+        state["loop_budget"] = loop_budget
+
+    final_state = _run_dispatch(state)
+    return {
+        "messages": final_state.get("messages", []),
+        "last_response": final_state.get("last_response", ""),
+        "last_agent": final_state.get("last_agent", ""),
+        "wf_state": final_state.get("wf_state", {}),
+        "agent_states": final_state.get("agent_states", {}),
+        "locals": final_state.get("locals", {}),
+    }
+
+
+if __name__ == "__main__":
+    print(
+        "Import this module and call kickoff(wf=workflow, inputs={'input': '...'}) "
+        "with a configured choreo-mini Workflow instance."
+    )
 
     {% if enable_profiling %}
-    # Profiling data would be collected here
-    print("Profiling enabled but not implemented in AutoGen template")
+    print("Profiling data is returned in the run(...) result.")
     {% endif %}

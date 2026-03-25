@@ -63,7 +63,7 @@ def _build_render_data(workflow_data: Dict[str, Any], backend: str) -> Dict[str,
     render_data["all_nodes"] = all_nodes
     render_data["agent_nodes"] = agent_nodes
 
-    if backend in ("langgraph", "crewai"):
+    if backend in ("langgraph", "crewai", "autogen"):
         render_data["execution_logic_literal"] = repr(workflow_data.get("execution_logic", []))
         render_data["has_conditionals"] = _contains_logic_type(workflow_data.get("execution_logic", []), "if")
         render_data["has_loops"] = (
