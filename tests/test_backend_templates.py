@@ -36,7 +36,8 @@ def test_autogen_template_renders_for_complex_workflow():
 def test_crewai_template_renders_for_complex_workflow():
     rendered, render_data = _render_backend("foo2.py", "crewai")
 
-    assert "CALL_STEPS = [" in rendered
+    assert "EXECUTION_LOGIC = [" in rendered
+    assert "def kickoff(" in rendered
     assert len(render_data["send_calls"]) >= 4
     assert "{{" not in rendered
 
