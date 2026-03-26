@@ -1,7 +1,8 @@
 from typing import Any, Callable, Dict, List, Optional, Union
 
 # import LLM types for execution
-from choreo_mini.core.llm import LLM, Message
+from choreo_mini.core.llm import LLM, Message, ToolCallMessage, ToolSchema
+from choreo_mini.core.tool_clients import BaseToolClient, create_tool_client
 
 class BaseNode:
     def __init__(
@@ -42,6 +43,7 @@ class AgentNode(BaseNode):
         system_prompt: Optional[str] = None,
         properties: Optional[Dict[str, Any]] = None,
         llm: Optional[LLM] = None,
+        toolset: Optional[List[Dict[str, Any]]] = None,
     ):
         super().__init__(name, "agent", properties, workflow=workflow)
         self.node_type = "agent"
@@ -51,6 +53,13 @@ class AgentNode(BaseNode):
         self.system_prompt: Optional[str] = system_prompt
         self.goals: List[str] = goals or []
         self.llm: Optional[LLM] = llm
+
+        # toolset: list of dicts, each describing one external tool server
+        self.toolset: List[Dict[str, Any]] = toolset or []
+        # lazily populated on first use: config['name'] -> BaseToolClient
+        self._tool_clients: Dict[str, BaseToolClient] = {}
+        # tracks which client owns each tool name
+        self._tool_owner: Dict[str, str] = {}
 
         # if a workflow was provided, register as conversational agent
         if workflow is not None:
@@ -76,7 +85,98 @@ class AgentNode(BaseNode):
     
     def __repr__(self):
         return f"AgentNode(name={self.name}, role={self.role}, tasks={self.tasks}, backstory={self.backstory})"
-    
+
+    # ------------------------------------------------------------------
+    # tool-client helpers (async)
+    # ------------------------------------------------------------------
+
+    async def _ensure_connected(self, config: Dict[str, Any]) -> BaseToolClient:
+        """Lazily create and cache the client for a single toolset entry."""
+        client_name = config["name"]
+        if client_name not in self._tool_clients:
+            client = create_tool_client(config)
+            await client.connect()
+            self._tool_clients[client_name] = client
+        return self._tool_clients[client_name]
+
+    async def get_tool_schemas(self) -> List[ToolSchema]:
+        """Connect all toolset entries and return aggregated tool schemas."""
+        schemas: List[ToolSchema] = []
+        for config in self.toolset:
+            client = await self._ensure_connected(config)
+            tools = await client.list_tools()
+            for tool in tools:
+                self._tool_owner[tool.name] = config["name"]
+            schemas.extend(tools)
+        return schemas
+
+    async def invoke_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
+        """Call a specific tool by name, routing to the correct client."""
+        client_name = self._tool_owner.get(tool_name)
+        if client_name is None:
+            raise KeyError(
+                f"Tool '{tool_name}' not found in any connected toolset client "
+                f"for agent '{self.name}'"
+            )
+        return await self._tool_clients[client_name].call_tool(tool_name, arguments)
+
+    async def execute_async(
+        self,
+        context: Optional[Union[str, List[Message]]] = None,
+        **kwargs: Any,
+    ) -> Message:
+        """Run the agent with an optional full async tool-use loop.
+
+        When no toolset is configured the behaviour is identical to the
+        synchronous :meth:`execute`, but runs inside the event loop.
+        When a toolset is present, tool schemas are fetched, passed to
+        the LLM via :meth:`~choreo_mini.core.llm.LLM.chat_async`, and
+        each :class:`~choreo_mini.core.llm.ToolCallMessage` is resolved
+        by invoking the matching tool client.  The loop runs until the
+        LLM returns a plain :class:`~choreo_mini.core.llm.Message` or the
+        iteration budget (10) is exceeded.
+        """
+        messages: List[Message] = []
+        if self.system_prompt:
+            messages.append(Message(role="system", content=self.system_prompt))
+        if isinstance(context, str):
+            messages.append(Message(role="user", content=context))
+        elif context:
+            messages.extend(context)
+
+        if not self.toolset:
+            return await self.llm.chat_async(messages, **kwargs)
+
+        tools = await self.get_tool_schemas()
+
+        for _ in range(10):
+            response = await self.llm.chat_async(messages, tools=tools, **kwargs)
+            if not isinstance(response, ToolCallMessage):
+                return response
+
+            # Append assistant's tool-call turn to the conversation
+            messages.append(Message(role="assistant", content=response.content))
+
+            # Execute each requested tool and feed results back
+            for req in response.tool_calls:
+                result = await self.invoke_tool(req.tool_name, req.arguments)
+                messages.append(
+                    Message(
+                        role="tool",
+                        content=result,
+                        tool_call_id=req.tool_call_id,
+                    )
+                )
+
+        return Message(role="assistant", content="[Tool-use loop budget exhausted]")
+
+    async def close(self) -> None:
+        """Close all cached tool-client connections for this agent."""
+        for client in self._tool_clients.values():
+            await client.close()
+        self._tool_clients.clear()
+        self._tool_owner.clear()
+
     def execute(
         self,
         context: Optional[Union[str, List[Message]]] = None,

@@ -24,7 +24,11 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 keywords = ["llm", "agents", "orchestration", "langgraph", "crewai", "autogen", "ai", "workflow", "agentic"]
-dependencies = ["jinja2>=3.0.0"]
+dependencies = [
+    "jinja2>=3.0.0",
+    "mcp>=1.0.0",
+    "httpx>=0.27.0",
+]
 
 [project.scripts]
 choreo_mini = "choreo_mini.cli:main"
@@ -39,6 +43,22 @@ dev = [
     "pytest>=7.0",
     "langgraph",
 ]
+tools = [
+    "mcp>=1.0.0",
+    "httpx>=0.27.0",
+]
+langgraph = [
+    "langgraph",
+    "langchain-mcp-adapters",
+]
+crewai = [
+    "crewai",
+    "crewai-tools",
+]
+autogen = [
+    "autogen",
+    "autogen-ext",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -46,3 +66,6 @@ include = ["choreo_mini", "choreo_mini.*"]
 
 [tool.setuptools.package-data]
 "choreo_mini" = ["templates/**/*.j2"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

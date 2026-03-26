@@ -10,22 +10,62 @@ MCP/A2A tooling, and a factory lets you instantiate by provider name.
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, Generator, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, Generator, List, Optional, Union
 
 
 @dataclass
 class Message:
     """Small container for chat messages.
 
-    ``role`` should be one of ``"system"``, ``"user"`` or
-    ``"assistant"``; providers generally accept the same schema.  The
-    ``content`` field holds the text of the message.
+    ``role`` should be one of ``"system"``, ``"user"``, ``"assistant"``,
+    or ``"tool"``; providers generally accept the same schema.  The
+    ``content`` field holds the text of the message.  ``tool_call_id`` is
+    populated on tool-result messages (``role='tool'``) to correlate the
+    result with the original tool-call request.
     """
 
     role: str
     content: str
+    tool_call_id: Optional[str] = None
+
+
+@dataclass
+class ToolSchema:
+    """Describes a single callable tool that an LLM may invoke.
+
+    ``input_schema`` follows the JSON Schema subset used by the MCP
+    protocol and the OpenAI function-calling API.
+    """
+
+    name: str
+    description: str
+    input_schema: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ToolCallRequest:
+    """A single tool invocation requested by the LLM."""
+
+    tool_call_id: str
+    tool_name: str
+    arguments: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ToolCallMessage:
+    """LLM response that requests one or more tool invocations.
+
+    Returned by :meth:`LLM.chat_async` when the model uses tool-calling
+    instead of (or in addition to) producing plain text.  ``content`` may
+    carry any partial text the model generated alongside the tool calls.
+    """
+
+    role: str
+    tool_calls: List[ToolCallRequest] = field(default_factory=list)
+    content: str = ""
 
 
 # registry for provider name -> class
@@ -100,6 +140,22 @@ class LLM(ABC):
         """
         prompt = "\n".join(m.content for m in messages if m.role == "user")
         return Message(role="assistant", content=self.generate(prompt, context=messages, **kwargs))
+
+    async def chat_async(
+        self,
+        messages: List[Message],
+        tools: Optional[List[ToolSchema]] = None,
+        **kwargs: Any,
+    ) -> Union[Message, ToolCallMessage]:
+        """Async chat call with optional tool-calling support.
+
+        The default implementation runs :meth:`chat` in a thread pool so
+        that blocking LLM providers do not stall the event loop.  Tool
+        schemas are accepted but ignored by the default; subclasses that
+        support tool-calling should override this method and return a
+        :class:`ToolCallMessage` when the model requests tool invocations.
+        """
+        return await asyncio.to_thread(self.chat, messages, **kwargs)
 
     @classmethod
     def create(cls, provider: str, **kwargs: Any) -> "LLM":

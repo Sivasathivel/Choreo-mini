@@ -1,5 +1,7 @@
 """Generated CrewAI workflow from choreo-mini code."""
 
+import asyncio
+import concurrent.futures
 from typing import Any, Dict, List, TypedDict
 
 from crewai import Agent, Task, Crew
@@ -17,6 +19,15 @@ NODE_RUNTIME_NAMES = {
 NODE_TYPES = {
 {% for node in all_nodes %}
     "{{ node.var_name }}": "{{ node.type }}",
+{% endfor %}
+}
+
+
+AGENT_TOOLSETS = {
+{% for node in agent_nodes %}
+{% if node.kwargs.get('toolset') %}
+    "{{ node.var_name }}": {{ node.kwargs['toolset'] }},
+{% endif %}
 {% endfor %}
 }
 
@@ -52,6 +63,21 @@ AUGASSIGN_OPERATORS = {
     "FloorDiv": "//",
     "Mod": "%",
 }
+
+
+def _run_async(coro):
+    """Run an async coroutine from synchronous code.
+
+    Handles the case where an event loop is already running (e.g. inside
+    a Jupyter notebook) by offloading the coroutine to a fresh thread
+    that owns its own event loop.
+    """
+    try:
+        asyncio.get_running_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result()
+    except RuntimeError:
+        return asyncio.run(coro)
 
 
 {% for node in agent_nodes %}
@@ -303,7 +329,15 @@ def _execute_send(state: CrewWorkflowState, stmt: Dict[str, Any]) -> None:
     if func_name.endswith(".send"):
         agent_name = str(_eval_expr(call["args"][0], state))
         user_input = _eval_expr(call["args"][1], state) if len(call["args"]) > 1 else _resolve_input(state)
-        response = wf.send(agent_name, str(user_input))
+        # Use async path for agents with a toolset so the tool-use loop runs
+        agent_var = next(
+            (k for k, v in NODE_RUNTIME_NAMES.items() if str(v) == agent_name),
+            None,
+        )
+        if agent_var and AGENT_TOOLSETS.get(agent_var):
+            response = _run_async(wf.send_async(agent_name, str(user_input)))
+        else:
+            response = wf.send(agent_name, str(user_input))
         assigned_value = _assign_call_result(state, stmt, response)
         response_text = getattr(response, "content", str(assigned_value))
         _record_task(
@@ -318,7 +352,10 @@ def _execute_send(state: CrewWorkflowState, stmt: Dict[str, Any]) -> None:
         runtime_name = str(NODE_RUNTIME_NAMES[base_name])
         agent_state = wf.agent_states[runtime_name]
         context_value = _eval_expr(call["args"][0], state) if call["args"] else _resolve_input(state)
-        response = agent_state.agent.execute(context=context_value)
+        if AGENT_TOOLSETS.get(base_name):
+            response = _run_async(agent_state.agent.execute_async(context=context_value))
+        else:
+            response = agent_state.agent.execute(context=context_value)
         assigned_value = _assign_call_result(state, stmt, response)
         response_text = getattr(response, "content", str(assigned_value))
         _record_task(

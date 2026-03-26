@@ -127,6 +127,54 @@ class Workflow:
 
         return response
 
+    async def send_async(self, agent_name: str, user_input: str) -> Message:
+        """Async variant of :meth:`send` that uses the agent's tool-capable path.
+
+        Behaviour is identical to :meth:`send` except that the agent's
+        :meth:`~choreo_mini.core.nodes.AgentNode.execute_async` is called,
+        which runs the full tool-use loop when the agent has a ``toolset``
+        configured.  The conversation history and profiling metrics are
+        updated in the same way as the synchronous path.
+        """
+        import time
+
+        state = self.agent_states.get(agent_name)
+        if state is None:
+            raise KeyError(f"Agent '{agent_name}' not found in workflow")
+
+        state.history.append(Message(role="user", content=user_input))
+        context = state.history.copy()
+
+        if self.enable_profiling:
+            import tracemalloc
+            snap_before = tracemalloc.take_snapshot()
+        start = time.time()
+        response = await state.agent.execute_async(context=context)
+        latency = time.time() - start
+
+        memory_used = 0.0
+        if self.enable_profiling:
+            import tracemalloc
+            snap_after = tracemalloc.take_snapshot()
+            diff = snap_after.compare_to(snap_before, "lineno")
+            memory_used = sum(stat.size_diff for stat in diff)
+
+        state.record_response(response, latency, memory_used)
+        if self.enable_profiling:
+            agg = self.profile_data.setdefault(
+                agent_name, {"calls": 0, "total_latency": 0.0, "total_memory": 0.0}
+            )
+            agg["calls"] += 1
+            agg["total_latency"] += latency
+            agg["total_memory"] += memory_used
+
+        return response
+
+    async def close(self) -> None:
+        """Close all tool-client connections held by registered agents."""
+        for agent_state in self.agent_states.values():
+            await agent_state.agent.close()
+
     def get_history(self, agent_name: str) -> List[Message]:
         state = self.agent_states.get(agent_name)
         if state is None:
