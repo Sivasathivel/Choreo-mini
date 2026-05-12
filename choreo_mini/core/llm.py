@@ -40,7 +40,7 @@ class ToolSchema:
 
     name: str
     description: str
-    parameters: Dict[str, Any] = field(default_factory=dict)
+    input_schema: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -80,14 +80,14 @@ class LLM:
 
     def __init__(
         self,
-        api_key: str,
-        endpoint: str,
-        model: str,
+        api_key: Optional[str] = None,
+        endpoint: Optional[str] = None,
+        model: Optional[str] = None,
         headers: Optional[Dict[str, str]] = None,
         **kwargs: Any,
     ) -> None:
         self.api_key = api_key
-        self.endpoint = endpoint.rstrip("/")
+        self.endpoint = endpoint.rstrip("/") if endpoint else None
         self.model = model
         self._extra_headers = headers or {}
 
@@ -98,7 +98,7 @@ class LLM:
                 "function": {
                     "name": t.name,
                     "description": t.description,
-                    "parameters": t.parameters,
+                    "parameters": t.input_schema,
                 },
             }
             for t in tools
@@ -177,7 +177,13 @@ class LLM:
 
         Pass ``tools`` to enable tool-calling; the return value will be a
         :class:`ToolCallMessage` if the model decides to invoke a tool.
+
+        When ``endpoint`` is ``None`` (e.g. in subclass mocks that only override
+        ``generate``), falls back to calling ``generate`` directly.
         """
+        if self.endpoint is None:
+            prompt = "\n".join(m.content for m in messages if m.role == "user")
+            return Message(role="assistant", content=self.generate(prompt, context=messages, **kwargs))
         payload_messages = [{"role": m.role, "content": m.content} for m in messages]
         result = self._post(payload_messages, tools=tools, **kwargs)
         if isinstance(result, ToolCallMessage):
@@ -191,4 +197,53 @@ class LLM:
         **kwargs: Any,
     ) -> Union[Message, ToolCallMessage]:
         """Async variant of :meth:`chat`; runs in a thread pool."""
+        return await asyncio.to_thread(self.chat, messages, tools, **kwargs)
+
+
+class CustomLLM:
+    """Wraps any callable as an LLM-compatible backend.
+
+    Useful for local models, test stubs, and custom logic that doesn't go
+    through an HTTP endpoint::
+
+        llm = CustomLLM(lambda prompt, context=None, **kw: f"echo: {prompt}")
+
+    The callable receives ``prompt`` (str), ``context`` (List[Message] or None),
+    and any extra kwargs forwarded from ``generate``/``chat``.
+    """
+
+    def __init__(self, generate_fn: Callable[[str, Any], str]) -> None:
+        self._fn = generate_fn
+
+    def generate(
+        self,
+        prompt: str,
+        context: Optional[List[Message]] = None,
+        **kwargs: Any,
+    ) -> str:
+        return self._fn(prompt, context=context, **kwargs)
+
+    def stream(
+        self,
+        prompt: str,
+        context: Optional[List[Message]] = None,
+        **kwargs: Any,
+    ) -> Generator[str, None, None]:
+        yield self.generate(prompt, context=context, **kwargs)
+
+    def chat(
+        self,
+        messages: List[Message],
+        tools: Optional[List[ToolSchema]] = None,
+        **kwargs: Any,
+    ) -> Message:
+        prompt = "\n".join(m.content for m in messages if m.role == "user")
+        return Message(role="assistant", content=self._fn(prompt, context=messages, **kwargs))
+
+    async def chat_async(
+        self,
+        messages: List[Message],
+        tools: Optional[List[ToolSchema]] = None,
+        **kwargs: Any,
+    ) -> Message:
         return await asyncio.to_thread(self.chat, messages, tools, **kwargs)
