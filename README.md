@@ -107,6 +107,23 @@ choreo_mini -f examples/foo2.py -b crewai -o output/foo2_crewai_output.py
 choreo_mini -f examples/foo2.py -b autogen -o output/foo2_autogen_output.py
 ```
 
+OpenAI-compatible remote endpoint example with richer operations routing:
+
+```bash
+choreo_mini -f examples/customer_ops_url.py -b langgraph -o output/customer_ops_langgraph_output.py
+choreo_mini -f examples/customer_ops_url.py -b crewai -o output/customer_ops_crewai_output.py
+choreo_mini -f examples/customer_ops_url.py -b autogen -o output/customer_ops_autogen_output.py
+```
+
+Run the source workflow directly and provide credentials at the prompts, or preload them with environment variables:
+
+```bash
+export CHOREO_LLM_URL="https://your-endpoint.example.com/v1"
+export CHOREO_API_TOKEN="your-token"
+export CHOREO_LLM_MODEL="gpt-4o-mini"
+python examples/customer_ops_url.py
+```
+
 Optional minimal smoke test (`examples/foo.py`):
 
 ```bash

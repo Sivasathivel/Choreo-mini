@@ -1,48 +1,46 @@
-"""Generic LLM abstraction and implementations.
+"""Generic LLM abstraction.
 
-This module defines a base ``LLM`` class plus built-in providers for
-popular hosted APIs (OpenAI, Anthropic, Gemini) and a ``CustomLLM``
-wrapper for arbitrary backends (local LLaMA, private endpoints, etc.).
+This module defines a single ``LLM`` class that talks to any OpenAI-compatible
+chat-completions endpoint using ``requests``.  Bring your own API key, endpoint,
+and model name; the class handles payload formatting and response parsing.
 
-The base class implements the minimal chat protocol used throughout
-MCP/A2A tooling, and a factory lets you instantiate by provider name.
+Most hosted LLMs (OpenAI, Anthropic via compat layer, Groq, Together, local
+Ollama, etc.) expose an OpenAI-compatible ``/v1/chat/completions`` endpoint,
+so this single class covers the common cases without any provider-specific
+subclassing.
 """
 
 from __future__ import annotations
 
 import asyncio
-from abc import ABC, abstractmethod
+import json
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Generator, List, Optional, Union
+from typing import Any, Dict, Generator, List, Optional, Union
+
+import requests
 
 
 @dataclass
 class Message:
     """Small container for chat messages.
 
-    ``role`` should be one of ``"system"``, ``"user"``, ``"assistant"``,
-    or ``"tool"``; providers generally accept the same schema.  The
-    ``content`` field holds the text of the message.  ``tool_call_id`` is
-    populated on tool-result messages (``role='tool'``) to correlate the
-    result with the original tool-call request.
+    ``role`` is one of ``"system"``, ``"user"``, or ``"assistant"``.
+    ``tool_call_id`` is populated on tool-result messages to correlate
+    the result with the original tool-call request.
     """
 
     role: str
-    content: str
+    content: Optional[str]
     tool_call_id: Optional[str] = None
 
 
 @dataclass
 class ToolSchema:
-    """Describes a single callable tool that an LLM may invoke.
-
-    ``input_schema`` follows the JSON Schema subset used by the MCP
-    protocol and the OpenAI function-calling API.
-    """
+    """Describes a single callable tool that an LLM may invoke."""
 
     name: str
     description: str
-    input_schema: Dict[str, Any] = field(default_factory=dict)
+    parameters: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -56,65 +54,109 @@ class ToolCallRequest:
 
 @dataclass
 class ToolCallMessage:
-    """LLM response that requests one or more tool invocations.
-
-    Returned by :meth:`LLM.chat_async` when the model uses tool-calling
-    instead of (or in addition to) producing plain text.  ``content`` may
-    carry any partial text the model generated alongside the tool calls.
-    """
+    """LLM response that requests one or more tool invocations."""
 
     role: str
     tool_calls: List[ToolCallRequest] = field(default_factory=list)
     content: str = ""
 
 
-# registry for provider name -> class
-_LLM_REGISTRY: Dict[str, type[LLM]] = {}
+class LLM:
+    """HTTP client for any OpenAI-compatible chat-completions endpoint.
 
-
-def register_llm(name: str) -> Callable[[type], type]:
-    """Decorator that registers an LLM subclass under ``name``.
-
-    Names are case-insensitive.
+    Parameters
+    ----------
+    api_key:
+        Bearer token (or equivalent) sent in the ``Authorization`` header.
+    endpoint:
+        Base URL of the API, e.g. ``"https://api.openai.com"`` or
+        ``"http://localhost:11434"`` for a local Ollama instance.
+    model:
+        Model identifier forwarded verbatim in the request payload.
+    headers:
+        Additional or override headers (e.g. ``{"x-api-key": "..."}`` for
+        providers that use non-Bearer auth).
     """
 
-    def decorator(cls: type) -> type:
-        _LLM_REGISTRY[name.lower()] = cls
-        return cls
+    def __init__(
+        self,
+        api_key: str,
+        endpoint: str,
+        model: str,
+        headers: Optional[Dict[str, str]] = None,
+        **kwargs: Any,
+    ) -> None:
+        self.api_key = api_key
+        self.endpoint = endpoint.rstrip("/")
+        self.model = model
+        self._extra_headers = headers or {}
 
-    return decorator
+    def _serialize_tools(self, tools: List[ToolSchema]) -> List[Dict[str, Any]]:
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.parameters,
+                },
+            }
+            for t in tools
+        ]
 
+    def _post(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[ToolSchema]] = None,
+        **kwargs: Any,
+    ) -> Union[str, ToolCallMessage]:
+        """Format the payload and POST to the chat-completions endpoint.
 
-class LLM(ABC):
-    """Abstract base that supports both single-turn and chat interactions.
+        Returns a plain string for normal replies, or a :class:`ToolCallMessage`
+        when the model's ``finish_reason`` is ``"tool_calls"``.
+        """
+        payload: Dict[str, Any] = {"model": self.model, "messages": messages, **kwargs}
+        if tools:
+            payload["tools"] = self._serialize_tools(tools)
+        hdrs = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            **self._extra_headers,
+        }
+        resp = requests.post(
+            f"{self.endpoint}/v1/chat/completions",
+            json=payload,
+            headers=hdrs,
+        )
+        resp.raise_for_status()
+        choice = resp.json()["choices"][0]
+        msg = choice["message"]
+        if choice.get("finish_reason") == "tool_calls":
+            tool_calls = [
+                ToolCallRequest(
+                    tool_call_id=tc["id"],
+                    tool_name=tc["function"]["name"],
+                    arguments=json.loads(tc["function"]["arguments"]),
+                )
+                for tc in msg.get("tool_calls", [])
+            ]
+            return ToolCallMessage(
+                role="assistant",
+                tool_calls=tool_calls,
+                content=msg.get("content") or "",
+            )
+        return msg["content"]
 
-    Subclasses may override ``generate`` and/or ``chat``.  ``generate``
-    accepts an optional ``context`` list of :class:`Message` objects that
-    will be included before the prompt; this makes it trivial to maintain
-    conversation history.
-    """
-
-    def __init__(self, endpoint: Optional[str] = None, **kwargs: Any) -> None:
-        # store kwargs (api_key, model, endpoint, etc.) for introspection
-        self.config = {**kwargs, "endpoint": endpoint}
-        # convenience attribute for most providers
-        self.endpoint = endpoint
-
-    @abstractmethod
     def generate(
         self,
         prompt: str,
         context: Optional[List[Message]] = None,
         **kwargs: Any,
     ) -> str:
-        """Generate text given a prompt and optional context.
-
-        ``context`` messages will be sent along with the prompt to the
-        underlying API; providers should interpret the list as a full
-        conversation history if they support it.  ``kwargs`` are passed
-        through to the provider (temperature, max_tokens, etc.).
-        """
-        raise NotImplementedError("subclasses must implement generate")
+        """Send a prompt (with optional prior-context messages) and return the response."""
+        messages = [{"role": m.role, "content": m.content} for m in (context or [])]
+        messages.append({"role": "user", "content": prompt})
+        return self._post(messages, **kwargs)
 
     def stream(
         self,
@@ -122,24 +164,25 @@ class LLM(ABC):
         context: Optional[List[Message]] = None,
         **kwargs: Any,
     ) -> Generator[str, None, None]:
-        """Yield pieces of the generated response.
-
-        The default simply emits the full ``generate`` result.
-        """
+        """Yield the response as a single chunk (non-streaming fallback)."""
         yield self.generate(prompt, context=context, **kwargs)
 
-    def chat(self, messages: List[Message], **kwargs: Any) -> Message:
-        """Perform a multi-turn chat operation.
+    def chat(
+        self,
+        messages: List[Message],
+        tools: Optional[List[ToolSchema]] = None,
+        **kwargs: Any,
+    ) -> Union[Message, ToolCallMessage]:
+        """Send a full conversation history and return the assistant reply.
 
-        This is the canonical interface for downstream protocols (MCP/A2A,
-        tool-calling, etc.).  ``kwargs`` are passed through to the provider.
-
-        The default falls back to :meth:`generate` after flattening the
-        user-submitted contents; ``context`` is the full message list so
-        providers may reconstruct the conversation if desired.
+        Pass ``tools`` to enable tool-calling; the return value will be a
+        :class:`ToolCallMessage` if the model decides to invoke a tool.
         """
-        prompt = "\n".join(m.content for m in messages if m.role == "user")
-        return Message(role="assistant", content=self.generate(prompt, context=messages, **kwargs))
+        payload_messages = [{"role": m.role, "content": m.content} for m in messages]
+        result = self._post(payload_messages, tools=tools, **kwargs)
+        if isinstance(result, ToolCallMessage):
+            return result
+        return Message(role="assistant", content=result)
 
     async def chat_async(
         self,
@@ -147,145 +190,5 @@ class LLM(ABC):
         tools: Optional[List[ToolSchema]] = None,
         **kwargs: Any,
     ) -> Union[Message, ToolCallMessage]:
-        """Async chat call with optional tool-calling support.
-
-        The default implementation runs :meth:`chat` in a thread pool so
-        that blocking LLM providers do not stall the event loop.  Tool
-        schemas are accepted but ignored by the default; subclasses that
-        support tool-calling should override this method and return a
-        :class:`ToolCallMessage` when the model requests tool invocations.
-        """
-        return await asyncio.to_thread(self.chat, messages, **kwargs)
-
-    @classmethod
-    def create(cls, provider: str, **kwargs: Any) -> "LLM":
-        """Return an instance of the named provider.
-
-        ``kwargs`` are forwarded to the provider's constructor.
-        """
-        provider_cls = _LLM_REGISTRY.get(provider.lower())
-        if provider_cls is None:
-            raise ValueError(f"Unknown LLM provider '{provider}'")
-        return provider_cls(**kwargs)
-
-
-@register_llm("openai")
-class OpenAI(LLM):
-    """Wrapper around OpenAI's completion/chat APIs.
-
-    ``endpoint`` may be used to point at a custom base URL (e.g. if you
-    are using a reverse proxy or on‑prem deployment).
-    """
-
-    def __init__(
-        self,
-        api_key: str,
-        model: str = "gpt-4",
-        endpoint: Optional[str] = None,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(api_key=api_key, model=model, endpoint=endpoint, **kwargs)
-        self.api_key = api_key
-        self.model = model
-        self.endpoint = endpoint or "https://api.openai.com"
-
-    def generate(
-        self,
-        prompt: str,
-        context: Optional[List[Message]] = None,
-        **kwargs: Any,
-    ) -> str:
-        # placeholder implementation
-        # TODO: replace with real API call, sending ``context`` if supported
-        return f"[OpenAI {self.model} at {self.endpoint} received prompt: {prompt!r} (context={context})]"
-
-
-@register_llm("anthropic")
-class Anthropic(LLM):
-    """Stub for Anthropic's Claude family.
-
-    Accepts an optional ``endpoint`` for custom deployments.
-    """
-
-    def __init__(
-        self,
-        api_key: str,
-        model: str = "claude-2",
-        endpoint: Optional[str] = None,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(api_key=api_key, model=model, endpoint=endpoint, **kwargs)
-        self.api_key = api_key
-        self.model = model
-        self.endpoint = endpoint or "https://api.anthropic.com"
-
-    def generate(
-        self,
-        prompt: str,
-        context: Optional[List[Message]] = None,
-        **kwargs: Any,
-    ) -> str:
-        return f"[Anthropic {self.model} at {self.endpoint} got {prompt!r} (context={context})]"
-
-
-@register_llm("gemini")
-class Gemini(LLM):
-    """Stub for Google's Gemini models.
-
-    ``endpoint`` can override the default Google endpoint.
-    """
-
-    def __init__(
-        self,
-        api_key: str,
-        model: str = "gemini-1.0",
-        endpoint: Optional[str] = None,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(api_key=api_key, model=model, endpoint=endpoint, **kwargs)
-        self.api_key = api_key
-        self.model = model
-        self.endpoint = endpoint or "https://api.google.com/gemini"
-
-    def generate(
-        self,
-        prompt: str,
-        context: Optional[List[Message]] = None,
-        **kwargs: Any,
-    ) -> str:
-        return f"[Gemini {self.model} at {self.endpoint} prompts {prompt!r} (context={context})]"
-
-
-@register_llm("custom")
-class CustomLLM(LLM):
-    """A generic wrapper for a user‑provided generation callable.
-
-    This makes it easy to integrate arbitrary backends such as local
-    fine‑tuned LLaMA models, custom REST endpoints, etc.
-
-    Example::
-
-        from transformers import pipeline
-
-        gen = pipeline("text-generation", model="./models/llama-tuned")
-        llm = CustomLLM(generate_fn=lambda prompt, **kw: gen(prompt, **kw)[0]["generated_text"])
-    """
-
-    def __init__(self, generate_fn: Callable[[str, Any], str], **kwargs: Any) -> None:
-        super().__init__(generate_fn=generate_fn, **kwargs)
-        self._generate_fn = generate_fn
-
-    def generate(
-        self,
-        prompt: str,
-        context: Optional[List[Message]] = None,
-        **kwargs: Any,
-    ) -> str:
-        # user provided function may or may not care about context; give it
-        # anyway for flexibility.
-        return self._generate_fn(prompt, context=context, **kwargs)
-
-    def stream(self, prompt: str, **kwargs: Any) -> Generator[str, None, None]:
-        # if the provided function supports streaming, you can adapt
-        # this method accordingly. the default just wraps ``generate``.
-        yield self.generate(prompt, **kwargs)
+        """Async variant of :meth:`chat`; runs in a thread pool."""
+        return await asyncio.to_thread(self.chat, messages, tools, **kwargs)
