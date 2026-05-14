@@ -84,12 +84,22 @@ class LLM:
         endpoint: Optional[str] = None,
         model: Optional[str] = None,
         headers: Optional[Dict[str, str]] = None,
+        timeout: int = 60,
         **kwargs: Any,
     ) -> None:
         self.api_key = api_key
-        self.endpoint = endpoint.rstrip("/") if endpoint else None
+        # Normalise: strip any /v1 or /v1/chat/completions suffix that users
+        # may accidentally include so _post() never produces a double /v1 path.
+        if endpoint:
+            endpoint = endpoint.rstrip("/")
+            for suffix in ("/v1/chat/completions", "/v1"):
+                if endpoint.endswith(suffix):
+                    endpoint = endpoint[: -len(suffix)]
+                    break
+        self.endpoint = endpoint or None
         self.model = model
         self._extra_headers = headers or {}
+        self.timeout = timeout
 
     def _serialize_tools(self, tools: List[ToolSchema]) -> List[Dict[str, Any]]:
         return [
@@ -118,17 +128,32 @@ class LLM:
         payload: Dict[str, Any] = {"model": self.model, "messages": messages, **kwargs}
         if tools:
             payload["tools"] = self._serialize_tools(tools)
-        hdrs = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            **self._extra_headers,
-        }
+        hdrs: Dict[str, str] = {"Content-Type": "application/json"}
+        if self.api_key:
+            hdrs["Authorization"] = f"Bearer {self.api_key}"
+        hdrs.update(self._extra_headers)
         resp = requests.post(
             f"{self.endpoint}/v1/chat/completions",
             json=payload,
             headers=hdrs,
+            timeout=self.timeout,
         )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError:
+            # Surface the API error body so the caller gets a meaningful message
+            try:
+                err_body = resp.json()
+                detail = (
+                    err_body.get("error", {}).get("message")
+                    or err_body.get("message")
+                    or resp.text
+                )
+            except Exception:
+                detail = resp.text
+            raise requests.HTTPError(
+                f"API error {resp.status_code}: {detail}", response=resp
+            )
         choice = resp.json()["choices"][0]
         msg = choice["message"]
         if choice.get("finish_reason") == "tool_calls":
@@ -182,7 +207,10 @@ class LLM:
         ``generate``), falls back to calling ``generate`` directly.
         """
         if self.endpoint is None:
-            prompt = "\n".join(m.content for m in messages if m.role == "user")
+            # No HTTP endpoint — delegate to generate().  Build the prompt from
+            # all non-tool messages so the system prompt is not silently dropped.
+            prompt_parts = [m.content for m in messages if m.role in ("system", "user") and m.content]
+            prompt = "\n".join(prompt_parts)
             return Message(role="assistant", content=self.generate(prompt, context=messages, **kwargs))
         payload_messages = [{"role": m.role, "content": m.content} for m in messages]
         result = self._post(payload_messages, tools=tools, **kwargs)

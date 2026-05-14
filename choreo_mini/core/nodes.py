@@ -227,6 +227,11 @@ class AgentNode(BaseNode):
         **kwargs:
             Forwarded to the underlying LLM (e.g. ``temperature``, ``max_tokens``).
         """
+        if self.llm is None:
+            raise ValueError(
+                f"Agent '{self.name}' has no LLM configured. "
+                "Pass llm=... when constructing AgentNode."
+            )
         messages: List[Message] = []
         if self.system_prompt:
             messages.append(Message(role="system", content=self.system_prompt))
@@ -252,6 +257,11 @@ class AgentNode(BaseNode):
         :class:`~choreo_mini.core.llm.Message` or the iteration budget (10) is
         exceeded.
         """
+        if self.llm is None:
+            raise ValueError(
+                f"Agent '{self.name}' has no LLM configured. "
+                "Pass llm=... when constructing AgentNode."
+            )
         messages: List[Message] = []
         if self.system_prompt:
             messages.append(Message(role="system", content=self.system_prompt))
