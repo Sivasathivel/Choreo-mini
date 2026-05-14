@@ -70,3 +70,4 @@ include = ["choreo_mini", "choreo_mini.*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+testpaths = ["tests"]
