@@ -69,10 +69,10 @@ Every agent and workflow has a confidence-weighted belief map — a capability n
 
 ```python
 # workflow-level world beliefs
-wf.beliefs.observe("tariff_rate", 0.12, confidence=0.9, step=round_)
+wf.beliefs.observe("penalty", 0.12, confidence=0.9, step=round_)
 
 # per-agent theory-of-mind beliefs
-wf.get_agent_belief("Analyst").observe_agent("Canada", "stance", "defensive", confidence=0.7)
+wf.get_agent_belief("Analyst").observe_agent("agent2", "stance", "defensive", confidence=0.7)
 
 # decay beliefs at end of each round (model passage of time)
 wf.decay_all_beliefs(factor=0.95)
@@ -119,11 +119,11 @@ from choreo_mini import Episode, nash_convergence_detector
 
 ep = Episode(
     agents={
-        "USA":    usa_workflow.propose,
-        "Canada": canada_workflow.propose,
-        "Mexico": mexico_workflow.propose,
+        "agent1":    agent1_workflow.propose,
+        "agent2": agent2_workflow.propose,
+        "agent3": Agent3_workflow.propose,
     },
-    env={"tariff_rate": 0.12, "market_access": 0.65, ...},
+    env={"penalty": 0.12, "coverage": 0.65, ...},
     reward_fn=huf_reward,           # your Human Utility Function
     env_update_fn=negotiation_step, # how proposals combine into new state
     termination_fn=nash_convergence_detector(window=5, reward_threshold=0.005),
@@ -140,7 +140,7 @@ Each `EpisodeStep` records the env snapshot, every agent's action, and every age
 
 ## MARL experiment — Benefit maximisation
 
-`examples/marl_huf_experiment.py` ships a ready-to-run multi-agent experiment where USA, Canada, and Mexico negotiate five trade parameters to maximise their national Human Utility Function scores:
+`examples/marl_huf_experiment.py` ships a ready-to-run multi-agent experiment where agent1, agent2, and Agent3 negotiate five trade parameters to maximise their national Human Utility Function scores:
 
 | Parameter | Agent 1 | Agent 2 | Agent 3 |
 |-----------|---------------|-------------------|-------------------|
@@ -182,7 +182,7 @@ Swap in a real LLM to have agents reason over the parameters in natural language
 
 ```python
 llm = LLM(api_key="sk-...", endpoint="https://api.openai.com", model="gpt-4o")
-usa = USAWorkflow(llm=llm)
+agent1 = agent1Workflow(llm=llm)
 ```
 
 ---
