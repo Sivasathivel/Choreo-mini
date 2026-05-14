@@ -1,5 +1,7 @@
 """Generated LangGraph workflow from choreo-mini code."""
 
+import asyncio
+import concurrent.futures
 from typing import Any, Dict, List, TypedDict
 
 from langgraph.constants import END
@@ -18,6 +20,15 @@ NODE_RUNTIME_NAMES = {
 NODE_TYPES = {
 {% for node in all_nodes %}
     "{{ node.var_name }}": "{{ node.type }}",
+{% endfor %}
+}
+
+
+AGENT_TOOLSETS = {
+{% for node in agent_nodes %}
+{% if node.kwargs.get('toolset') %}
+    "{{ node.var_name }}": {{ node.kwargs['toolset'] }},
+{% endif %}
 {% endfor %}
 }
 
@@ -53,6 +64,21 @@ AUGASSIGN_OPERATORS = {
     "FloorDiv": "//",
     "Mod": "%",
 }
+
+
+def _run_async(coro):
+    """Run an async coroutine from synchronous code.
+
+    Handles the case where an event loop is already running (e.g. inside
+    a LangGraph executor or Jupyter notebook) by offloading the coroutine
+    to a fresh thread that owns its own event loop.
+    """
+    try:
+        asyncio.get_running_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result()
+    except RuntimeError:
+        return asyncio.run(coro)
 
 
 class WorkflowState(TypedDict, total=False):
@@ -361,14 +387,25 @@ def send_call_node(state: WorkflowState) -> WorkflowState:
     if func_name.endswith(".send"):
         agent_name = _eval_expr(call["args"][0], state)
         user_input = _eval_expr(call["args"][1], state) if len(call["args"]) > 1 else _resolve_input(state)
-        response = wf.send(str(agent_name), str(user_input))
+        # Use async path for agents with a toolset so the tool-use loop runs
+        agent_var = next(
+            (k for k, v in NODE_RUNTIME_NAMES.items() if str(v) == str(agent_name)),
+            None,
+        )
+        if agent_var and AGENT_TOOLSETS.get(agent_var):
+            response = _run_async(wf.send_async(str(agent_name), str(user_input)))
+        else:
+            response = wf.send(str(agent_name), str(user_input))
         message_agent = str(agent_name)
     else:
         base_name = func_name.rsplit(".", 1)[0]
         runtime_name = NODE_RUNTIME_NAMES[base_name]
         agent_state = wf.agent_states[str(runtime_name)]
         context_value = _eval_expr(call["args"][0], state) if call["args"] else _resolve_input(state)
-        response = agent_state.agent.execute(context=context_value)
+        if AGENT_TOOLSETS.get(base_name):
+            response = _run_async(agent_state.agent.execute_async(context=context_value))
+        else:
+            response = agent_state.agent.execute(context=context_value)
         message_agent = str(runtime_name)
 
     assigned_value = _assign_call_result(state, stmt, response)

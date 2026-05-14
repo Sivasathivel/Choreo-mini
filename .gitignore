@@ -33,3 +33,5 @@ output/*.py
 
 # macOS filesystem artifacts
 .DS_Store
+
+FEATURE_MATRIX.md

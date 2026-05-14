@@ -55,3 +55,75 @@ def test_backend_render_data_collects_nested_calls():
 
     assert len(autogen_data["send_calls"]) >= 4
     assert len(crewai_data["send_calls"]) >= 4
+
+
+# ---------------------------------------------------------------------------
+# Toolset rendering tests
+# ---------------------------------------------------------------------------
+
+_TOOLSET_SNIPPET = """
+toolset=[
+    {
+        'url': 'http://localhost:8000/sse',
+        'name': 'calculator',
+        'description': 'arithmetic',
+        'type': 'mcp',
+        'subtype': 'sse',
+    }
+]
+"""
+
+_TOOLSET_SOURCE = f"""\
+from choreo_mini.core.workflow import Workflow
+from choreo_mini.core.nodes import AgentNode
+from choreo_mini.core.llm import CustomLLM
+
+wf = Workflow("demo")
+bot = AgentNode(wf, "Bot", role="assistant", llm=CustomLLM(lambda p, **kw: "ok"),
+                {_TOOLSET_SNIPPET.strip()})
+result = wf.send("Bot", "hello")
+"""
+
+
+def _render_from_source(source: str, backend: str) -> str:
+    from choreo_mini.cli import _build_render_data
+    workflow_data = parse_workflow_code(source)
+    render_data = _build_render_data(workflow_data, backend)
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(TEMPLATES_ROOT / backend))
+    template = env.get_template("workflow.j2")
+    return template.render(**render_data)
+
+
+def test_langgraph_toolset_rendered():
+    rendered = _render_from_source(_TOOLSET_SOURCE, "langgraph")
+    assert "AGENT_TOOLSETS" in rendered
+    assert "'calculator'" in rendered or "\"calculator\"" in rendered
+    assert "_run_async" in rendered
+    assert "wf.send_async" in rendered
+    # Must be valid Python
+    ast.parse(rendered)
+
+
+def test_langgraph_no_toolset_no_async_send():
+    rendered, _ = _render_backend("foo.py", "langgraph")
+    # AGENT_TOOLSETS dict should exist but be empty
+    assert "AGENT_TOOLSETS" in rendered
+    # Without toolsets, the async send branch should still appear in template
+    # but AGENT_TOOLSETS being empty means branch won't trigger at runtime
+    ast.parse(rendered)
+
+
+def test_crewai_toolset_rendered():
+    rendered = _render_from_source(_TOOLSET_SOURCE, "crewai")
+    assert "AGENT_TOOLSETS" in rendered
+    assert "_run_async" in rendered
+    assert "wf.send_async" in rendered
+    ast.parse(rendered)
+
+
+def test_autogen_toolset_rendered():
+    rendered = _render_from_source(_TOOLSET_SOURCE, "autogen")
+    assert "AGENT_TOOLSETS" in rendered
+    assert "_run_async" in rendered
+    assert "wf.send_async" in rendered
+    ast.parse(rendered)
