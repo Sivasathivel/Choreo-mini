@@ -138,16 +138,16 @@ Each `EpisodeStep` records the env snapshot, every agent's action, and every age
 
 ---
 
-## MARL experiment — CUSMA/USMCA HUF maximisation
+## MARL experiment — Benefit maximisation
 
 `examples/marl_huf_experiment.py` ships a ready-to-run multi-agent experiment where USA, Canada, and Mexico negotiate five trade parameters to maximise their national Human Utility Function scores:
 
-| Parameter | USA preference | Canada preference | Mexico preference |
+| Parameter | Agent 1 | Agent 2 | Agent 3 |
 |-----------|---------------|-------------------|-------------------|
-| `tariff_rate` | ↓ | ↓ | neutral |
-| `market_access` | neutral | ↑ | ↑ |
-| `labor_compliance` | ↑ | neutral | ↓ |
-| `rules_of_origin` | ↑ | neutral | ↓ |
+| `penalty` | ↓ | ↓ | neutral |
+| `coverage` | neutral | ↑ | ↑ |
+| `safety` | ↑ | neutral | ↓ |
+| `source` | ↑ | neutral | ↓ |
 | `env_score` | ↑ | ↑ | neutral |
 
 ```bash
@@ -157,9 +157,9 @@ python examples/marl_huf_experiment.py
 Sample output:
 ```
 ======================================================================
-  CUSMA/USMCA MARL — HUF Maximisation Experiment
+   MARL — Benefit Maximisation Experiment
 ======================================================================
-  Round      USA   Canada   Mexico   GlobalHUF
+  Round      Agent1   Agent2   Agent3   GlobalHUF
   --------------------------------------------
    init   0.6700   0.6830   0.5290      1.8820
       1   0.6700   0.6830   0.5290      1.8820
@@ -169,13 +169,13 @@ Sample output:
   Converged after 40 rounds
 
   Final trade parameters
-  tariff_rate           0.1200  →  0.0000  (▼ 0.1200)
-  market_access         0.6500  →  1.0000  (▲ 0.3500)
-  labor_compliance      0.5500  →  0.7500  (▲ 0.2000)
-  rules_of_origin       0.6200  →  0.6200  (─ 0.0000)
-  env_score             0.5800  →  1.0000  (▲ 0.4200)
+  penalty           0.1200  →  0.0000  (▼ 0.1200)
+  coverage          0.6500  →  1.0000  (▲ 0.3500)
+  safety            0.5500  →  0.7500  (▲ 0.2000)
+  source            0.6200  →  0.6200  (─ 0.0000)
+  env_score         0.5800  →  1.0000  (▲ 0.4200)
 
-  Global HUF: 1.8820  →  2.4500  (+0.5680)
+  Global Benefit Score: 1.8820  →  2.4500  (+0.5680)
 ```
 
 Swap in a real LLM to have agents reason over the parameters in natural language:
