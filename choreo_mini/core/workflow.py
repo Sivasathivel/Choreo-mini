@@ -1,9 +1,37 @@
 """Workflow orchestration for choreo-mini.
 
-A :class:`Workflow` owns a set of nodes and manages the runtime state,
-conversation history, and profiling metrics for every agent it contains.
-It is the primary entry-point for sending messages, collecting histories,
-and inspecting performance.
+The intended usage pattern is to **subclass** :class:`Workflow` and define
+agents and services as instance attributes inside ``__init__``.  The base
+class handles all state management automatically — conversation history,
+profiling metrics, and epistemic beliefs are available without any extra
+wiring::
+
+    from choreo_mini.core.workflow import Workflow
+    from choreo_mini.core.nodes import AgentNode
+    from choreo_mini.core.llm import CustomLLM
+
+    class Planner(Workflow):
+        def __init__(self):
+            super().__init__("planner", enable_profiling=True)
+            self.analyst = AgentNode(self, "Analyst", role="analyse tasks", llm=...)
+            self.executor = AgentNode(self, "Executor", role="execute plans", llm=...)
+
+        def run(self, task: str) -> str:
+            plan = self.send("Analyst", task)
+            # update workflow-level belief after each step
+            self.beliefs.observe("last_plan", plan.content, confidence=0.95)
+            result = self.send("Executor", plan.content)
+            return result.content
+
+Each :class:`~choreo_mini.core.nodes.AgentNode` created with ``self`` as the
+first argument registers automatically.  The workflow exposes:
+
+* ``self.beliefs`` — a :class:`~choreo_mini.core.belief.BeliefState` shared
+  across the entire workflow (environment / world observations).
+* Per-agent belief states accessible via :meth:`get_agent_belief` — each
+  agent independently tracks what it believes about the world and other agents.
+* Conversation history via :meth:`get_history`.
+* Profiling metrics via :meth:`get_profile`.
 """
 
 from __future__ import annotations
@@ -12,6 +40,7 @@ import time
 import tracemalloc
 from typing import Any, Dict, List, Optional
 
+from choreo_mini.core.belief import Belief, BeliefState
 from choreo_mini.core.nodes import BaseNode, AgentNode, ServiceNode
 from choreo_mini.core.llm import Message
 
@@ -21,7 +50,29 @@ from choreo_mini.core.llm import Message
 # ---------------------------------------------------------------------------
 
 class AgentState:
-    """Runtime state for a single agent managed by a :class:`Workflow`."""
+    """Runtime state for a single agent managed by a :class:`Workflow`.
+
+    Holds the full conversation history, per-call profiling metrics, and an
+    independent :class:`~choreo_mini.core.belief.BeliefState` for this agent.
+    Users never instantiate this directly — the workflow creates and owns it.
+
+    Attributes
+    ----------
+    agent:
+        The :class:`~choreo_mini.core.nodes.AgentNode` this state belongs to.
+    history:
+        Ordered list of :class:`~choreo_mini.core.llm.Message` objects
+        representing the full conversation for this agent.
+    call_count:
+        Number of times this agent has been invoked.
+    total_latency:
+        Cumulative wall-clock inference time in seconds.
+    total_memory:
+        Cumulative memory delta across all calls in bytes.
+    belief:
+        The agent's private :class:`~choreo_mini.core.belief.BeliefState` —
+        what this agent believes about the world and other agents.
+    """
 
     def __init__(self, agent: AgentNode) -> None:
         self.agent = agent
@@ -29,6 +80,7 @@ class AgentState:
         self.call_count: int = 0
         self.total_latency: float = 0.0
         self.total_memory: float = 0.0
+        self.belief: BeliefState = BeliefState()
 
     def record_response(self, response: Message, latency: float, memory: float) -> None:
         self.history.append(response)
@@ -45,12 +97,11 @@ class AgentState:
 # ---------------------------------------------------------------------------
 
 class Workflow:
-    """Orchestrates a network of nodes and agents.
+    """Base class for all choreo-mini agentic workflows.
 
-    Maintains agent states (conversation history, profiling metrics) and
-    provides :meth:`send` / :meth:`send_async` as the primary interface for
-    driving agent interactions.  The CLI-to-LangGraph/CrewAI/AutoGen
-    conversion uses the AST parser and is independent of this runtime layer.
+    Subclass this to define your workflow.  Every
+    :class:`~choreo_mini.core.nodes.AgentNode` constructed with ``self`` as
+    its first argument registers automatically — no manual bookkeeping needed.
 
     Parameters
     ----------
@@ -59,6 +110,38 @@ class Workflow:
     enable_profiling:
         When ``True``, wall-clock latency and memory delta are recorded for
         every agent call and exposed via :meth:`get_profile`.
+
+    Built-in state (available to all subclasses)
+    --------------------------------------------
+    ``self.beliefs`` : :class:`~choreo_mini.core.belief.BeliefState`
+        Workflow-level shared beliefs — observations about the environment
+        that span all agents (e.g. current negotiation terms, round number).
+    ``self.state`` : dict
+        General-purpose key/value store for workflow-level variables.
+    ``self.agent_states`` : dict
+        Maps agent name → :class:`AgentState`.  Each entry carries its own
+        :class:`~choreo_mini.core.belief.BeliefState` in addition to history
+        and profiling counters.
+
+    Example
+    -------
+    ::
+
+        class NegotiatorWorkflow(Workflow):
+            def __init__(self, llm):
+                super().__init__("negotiator")
+                self.strategist = AgentNode(self, "Strategist",
+                                            role="trade negotiation strategist",
+                                            llm=llm)
+                self.analyst = AgentNode(self, "Analyst",
+                                         role="economic data analyst",
+                                         llm=llm)
+
+            def negotiate(self, proposal: str) -> str:
+                analysis = self.send("Analyst", proposal)
+                self.beliefs.observe("last_proposal", proposal, confidence=1.0)
+                response = self.send("Strategist", analysis.content)
+                return response.content
     """
 
     def __init__(self, name: str, enable_profiling: bool = False) -> None:
@@ -68,8 +151,11 @@ class Workflow:
         self.state: Dict[str, Any] = {}
         self.profile_data: Dict[str, Dict[str, float]] = {}
         self.agent_states: Dict[str, AgentState] = {}
-        self.enable_profiling = enable_profiling
 
+        # workflow-level shared belief state (environment / world observations)
+        self.beliefs: BeliefState = BeliefState()
+
+        self.enable_profiling = enable_profiling
         if self.enable_profiling:
             tracemalloc.start()
 
@@ -80,26 +166,25 @@ class Workflow:
     def add_node(self, node: BaseNode, parent_name: Optional[str] = None) -> None:
         """Register a generic node in the workflow graph.
 
-        Nodes created with the ``workflow`` constructor argument register
-        automatically; this method exists for subclasses or dynamic
-        construction.
+        Nodes created with ``workflow=self`` register automatically; call this
+        method only for subclasses or dynamic construction.
 
         Parameters
         ----------
         node:
             The node to register.
         parent_name:
-            If provided, the node is appended as a child of the named parent.
-            When omitted, the node becomes the root if no root exists yet.
+            If given, the node is appended as a child of the named parent.
+            When omitted, the node becomes the root if none exists yet.
         """
         if node.name in self.nodes:
-            raise ValueError(f"Node '{node.name}' is already registered in this workflow.")
+            raise ValueError(f"Node '{node.name}' is already registered in workflow '{self.name}'.")
         self.nodes[node.name] = node
         node.workflow = self
         if parent_name:
             parent = self.nodes.get(parent_name)
             if parent is None:
-                raise ValueError(f"Parent node '{parent_name}' not found.")
+                raise ValueError(f"Parent node '{parent_name}' not found in workflow '{self.name}'.")
             parent.add_child(node)
         elif self.root is None:
             self.root = node
@@ -112,10 +197,11 @@ class Workflow:
         """Register an :class:`~choreo_mini.core.nodes.AgentNode`.
 
         Called automatically when an ``AgentNode`` is constructed with this
-        workflow.  Agents are addressed by name in :meth:`send`.
+        workflow.  Each agent receives its own :class:`AgentState` (including
+        an independent :class:`~choreo_mini.core.belief.BeliefState`).
         """
         if agent.name in self.agent_states:
-            raise ValueError(f"Agent '{agent.name}' is already registered in this workflow.")
+            raise ValueError(f"Agent '{agent.name}' is already registered in workflow '{self.name}'.")
         self.agent_states[agent.name] = AgentState(agent)
 
     # ------------------------------------------------------------------
@@ -125,8 +211,7 @@ class Workflow:
     def send(self, agent_name: str, user_input: str) -> Message:
         """Send a message to a named agent and return the reply.
 
-        Conversation history is maintained automatically; you do not need to
-        pass prior context manually.
+        Conversation history is maintained automatically.
 
         Parameters
         ----------
@@ -136,7 +221,6 @@ class Workflow:
             The user-turn text to send.
         """
         state = self._get_agent_state(agent_name)
-
         state.history.append(Message(role="user", content=user_input))
         context = state.history.copy()
 
@@ -154,15 +238,13 @@ class Workflow:
         return response
 
     async def send_async(self, agent_name: str, user_input: str) -> Message:
-        """Async variant of :meth:`send` that uses the agent's tool-capable path.
+        """Async variant of :meth:`send` with full tool-use loop support.
 
         Identical to :meth:`send` except that
         :meth:`~choreo_mini.core.nodes.AgentNode.execute_async` is called,
-        which runs the full tool-use loop when the agent has a ``toolset``
-        configured.
+        which resolves tool calls when the agent has a ``toolset`` configured.
         """
         state = self._get_agent_state(agent_name)
-
         state.history.append(Message(role="user", content=user_input))
         context = state.history.copy()
 
@@ -178,6 +260,43 @@ class Workflow:
 
         self._record(agent_name, state, response, latency, memory_used)
         return response
+
+    # ------------------------------------------------------------------
+    # Epistemic belief helpers
+    # ------------------------------------------------------------------
+
+    def get_agent_belief(self, agent_name: str) -> BeliefState:
+        """Return the private :class:`~choreo_mini.core.belief.BeliefState`
+        for the named agent.
+
+        Use this to read or update what a specific agent believes — distinct
+        from ``self.beliefs`` which holds workflow-wide shared beliefs.
+        """
+        return self._get_agent_state(agent_name).belief
+
+    def update_agent_belief(
+        self,
+        agent_name: str,
+        key: str,
+        value: Any,
+        confidence: float = 1.0,
+        source: str = "observation",
+        step: int = 0,
+    ) -> None:
+        """Convenience wrapper: update a world-belief for a named agent."""
+        self._get_agent_state(agent_name).belief.observe(
+            key, value, confidence=confidence, source=source, step=step
+        )
+
+    def decay_all_beliefs(self, factor: float = 0.95) -> None:
+        """Decay confidence in all beliefs — both workflow-level and per-agent.
+
+        Call this at the end of each episode step to model the passage of time
+        and force re-observation of stale information.
+        """
+        self.beliefs.decay(factor)
+        for state in self.agent_states.values():
+            state.belief.decay(factor)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -201,13 +320,13 @@ class Workflow:
         self._get_agent_state(agent_name).clear_history()
 
     def get_profile(self, agent_name: Optional[str] = None) -> Dict[str, Dict[str, float]]:
-        """Return profiling data.
+        """Return profiling data collected since ``enable_profiling=True``.
 
         Parameters
         ----------
         agent_name:
-            When provided, returns only that agent's data.  Otherwise returns
-            the full ``profile_data`` dict for all agents.
+            When provided, returns data for that agent only.  Otherwise
+            returns the full ``profile_data`` dict for all agents.
         """
         if agent_name:
             data = self.profile_data.get(agent_name)
@@ -223,7 +342,10 @@ class Workflow:
     def _get_agent_state(self, agent_name: str) -> AgentState:
         state = self.agent_states.get(agent_name)
         if state is None:
-            raise KeyError(f"Agent '{agent_name}' is not registered in this workflow.")
+            raise KeyError(
+                f"Agent '{agent_name}' is not registered in workflow '{self.name}'. "
+                f"Registered agents: {list(self.agent_states)}"
+            )
         return state
 
     def _record(
