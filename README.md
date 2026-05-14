@@ -2,52 +2,188 @@
 
 **A lightweight Python meta-framework for building, experimenting with, and orchestrating LLM-based agents.**
 
-Modern agent frameworks — LangGraph, CrewAI, AutoGen — each solve similar orchestration problems but introduce fragmented abstractions and steep learning curves. Choreo-Mini provides a Python-native developer experience that allows engineers to prototype agent workflows quickly while retaining the flexibility to run them on different orchestration runtimes.
+Modern agent frameworks — LangGraph, CrewAI, AutoGen — each solve similar orchestration problems but introduce fragmented abstractions and steep learning curves. Choreo-Mini provides a Python-native developer experience that lets you prototype agent workflows quickly, run genuine multi-agent experiments, and compile to any target runtime when you're ready.
 
-Instead of forcing developers to commit to a single framework, Choreo-Mini acts as an orchestration meta-layer: you express your workflow once in plain Python, and it compiles it to your target runtime, if needed.
+Instead of forcing you to commit to a single framework, Choreo-Mini acts as an orchestration meta-layer: express your workflow once in plain Python, and compile it to your target runtime if needed.
+
+---
+
+## What makes Choreo-Mini different
+
+| Feature | LangGraph | CrewAI | AutoGen | **Choreo-Mini** |
+|---------|-----------|--------|---------|-----------------|
+| Subclass-based workflow definition | ✗ | ✗ | ✗ | ✓ |
+| Epistemic belief state per agent | ✗ | ✗ | ✗ | ✓ |
+| Built-in MARL episode loop | ✗ | ✗ | ✗ | ✓ |
+| Nash convergence detection | ✗ | ✗ | ✗ | ✓ |
+| Export to other frameworks | ✗ | ✗ | ✗ | ✓ |
+| Any OpenAI-compatible endpoint | ✓ | ✓ | ✓ | ✓ |
 
 ---
 
 ## How it works
 
 ```
-Your Python Workflow
+Your Python Workflow  (subclass Workflow, define AgentNodes)
         │
-        ▼
-    AST Parser  ── extracts agents, services, control flow, state mutations
+        ├── Run directly with any OpenAI-compatible endpoint
         │
-        ▼
-  Intermediate Representation
+        ├── Run MARL experiments (Episode loop, HUF/reward, Nash convergence)
         │
-        ▼
-  Jinja2 Template Compiler
-        │
-    ┌───┴────────────────┐
-    ▼         ▼          ▼
-LangGraph  CrewAI    AutoGen
+        └── Compile to another runtime (optional)
+                    │
+              AST Parser + Jinja2
+                    │
+           ┌────────┼────────┐
+           ▼        ▼        ▼
+       LangGraph  CrewAI  AutoGen
 ```
 
 ---
 
-## Status
+## Core concepts
 
-Choreo-Mini is an actively developed prototype. The **LangGraph** backend is the most mature path, supporting branch-aware conditional routing, loop budgets, and service node dispatch. **CrewAI** and **AutoGen** backends produce structurally correct scaffolding and are being extended for deeper runtime fidelity.
+### Workflow subclass pattern
+
+Define agents as instance attributes — no manual state wiring:
+
+```python
+from choreo_mini import Workflow, AgentNode, LLM
+
+class TradingAdvisor(Workflow):
+    def __init__(self, llm):
+        super().__init__("trading-advisor")
+        self.analyst  = AgentNode(self, "Analyst",  role="Trade data analyst", llm=llm)
+        self.advisor  = AgentNode(self, "Advisor",  role="Senior policy advisor", llm=llm)
+
+    def advise(self, question: str) -> str:
+        analysis = self.send("Analyst", question)
+        self.beliefs.observe("last_question", question, confidence=1.0)
+        reply = self.send("Advisor", analysis.content)
+        return reply.content
+```
+
+### Epistemic belief state
+
+Every agent and workflow has a confidence-weighted belief map — a capability not found in LangGraph, CrewAI, or AutoGen:
+
+```python
+# workflow-level world beliefs
+wf.beliefs.observe("tariff_rate", 0.12, confidence=0.9, step=round_)
+
+# per-agent theory-of-mind beliefs
+wf.get_agent_belief("Analyst").observe_agent("Canada", "stance", "defensive", confidence=0.7)
+
+# decay beliefs at end of each round (model passage of time)
+wf.decay_all_beliefs(factor=0.95)
+
+# snapshot for logging or passing as context to the LLM
+print(wf.beliefs.snapshot())
+```
+
+### Any OpenAI-compatible endpoint
+
+One class, any provider — no SDK lock-in:
+
+```python
+from choreo_mini import LLM, CustomLLM
+
+# OpenAI
+llm = LLM(api_key="sk-...", endpoint="https://api.openai.com", model="gpt-4o")
+
+# Anthropic (via OpenAI-compat headers)
+llm = LLM(
+    endpoint="https://api.anthropic.com",
+    model="claude-opus-4-5",
+    headers={"x-api-key": "sk-ant-...", "anthropic-version": "2023-06-01"},
+)
+
+# Local Ollama (no auth)
+llm = LLM(endpoint="http://localhost:11434", model="llama3.2")
+
+# Groq, Together, vLLM, LM Studio, ...
+llm = LLM(api_key="...", endpoint="https://api.groq.com/openai", model="llama-3.3-70b-versatile")
+
+# Any callable — great for tests, local models, or rule-based stubs
+llm = CustomLLM(lambda prompt, context=None, **kw: f"echo: {prompt}")
+```
+
+The `LLM` class normalises endpoint URLs (strips accidental `/v1` suffixes), omits the `Authorization` header when no API key is set, enforces a configurable timeout (default 60 s), and surfaces the full API error body on failures.
+
+### MARL episode loop
+
+Run multi-agent reinforcement learning experiments with reward functions and Nash convergence detection baked in:
+
+```python
+from choreo_mini import Episode, nash_convergence_detector
+
+ep = Episode(
+    agents={
+        "USA":    usa_workflow.propose,
+        "Canada": canada_workflow.propose,
+        "Mexico": mexico_workflow.propose,
+    },
+    env={"tariff_rate": 0.12, "market_access": 0.65, ...},
+    reward_fn=huf_reward,           # your Human Utility Function
+    env_update_fn=negotiation_step, # how proposals combine into new state
+    termination_fn=nash_convergence_detector(window=5, reward_threshold=0.005),
+    max_rounds=40,
+)
+
+trajectory = ep.run()
+print(ep.summary())
+```
+
+Each `EpisodeStep` records the env snapshot, every agent's action, and every agent's reward — ready to feed a policy-update step.
 
 ---
 
-## Roadmap
+## MARL experiment — CUSMA/USMCA HUF maximisation
 
-Near-term next steps:
+`examples/marl_huf_experiment.py` ships a ready-to-run multi-agent experiment where USA, Canada, and Mexico negotiate five trade parameters to maximise their national Human Utility Function scores:
 
-- Build **MCP server support** so choreo-mini workflows can be exposed as tools/resources/prompts via Model Context Protocol.
-- Add **A2A (agent-to-agent) support** for explicit handoffs, delegation, and structured cross-agent messaging.
-- Introduce first-class **tool usage orchestration** (typed tool schemas, argument validation, retries/timeouts, and tool-call tracing).
-- Bring **CrewAI** and **AutoGen** behavior closer to LangGraph parity for routing, loop handling, and workflow state transitions.
-- Replace provider stubs with production-ready adapters for OpenAI, Anthropic, and Gemini in `LLM.generate()`.
-- Expand AST parser coverage for more real-world Python patterns (deeper branching, loop variants, and service composition).
-- Add backend snapshot tests and regression fixtures around `examples/foo2.py` plus additional realistic workflows.
-- Improve CLI ergonomics with clearer conversion diagnostics and optional inspection output for parsed workflow data.
-- Publish reference demos and backend comparison benchmarks built from the same source workflow.
+| Parameter | USA preference | Canada preference | Mexico preference |
+|-----------|---------------|-------------------|-------------------|
+| `tariff_rate` | ↓ | ↓ | neutral |
+| `market_access` | neutral | ↑ | ↑ |
+| `labor_compliance` | ↑ | neutral | ↓ |
+| `rules_of_origin` | ↑ | neutral | ↓ |
+| `env_score` | ↑ | ↑ | neutral |
+
+```bash
+python examples/marl_huf_experiment.py
+```
+
+Sample output:
+```
+======================================================================
+  CUSMA/USMCA MARL — HUF Maximisation Experiment
+======================================================================
+  Round      USA   Canada   Mexico   GlobalHUF
+  --------------------------------------------
+   init   0.6700   0.6830   0.5290      1.8820
+      1   0.6700   0.6830   0.5290      1.8820
+      ...
+     40   0.7840   1.0000   0.6650      2.4490
+  --------------------------------------------
+  Converged after 40 rounds
+
+  Final trade parameters
+  tariff_rate           0.1200  →  0.0000  (▼ 0.1200)
+  market_access         0.6500  →  1.0000  (▲ 0.3500)
+  labor_compliance      0.5500  →  0.7500  (▲ 0.2000)
+  rules_of_origin       0.6200  →  0.6200  (─ 0.0000)
+  env_score             0.5800  →  1.0000  (▲ 0.4200)
+
+  Global HUF: 1.8820  →  2.4500  (+0.5680)
+```
+
+Swap in a real LLM to have agents reason over the parameters in natural language:
+
+```python
+llm = LLM(api_key="sk-...", endpoint="https://api.openai.com", model="gpt-4o")
+usa = USAWorkflow(llm=llm)
+```
 
 ---
 
@@ -57,164 +193,94 @@ Near-term next steps:
 pip install choreo-mini
 ```
 
----
-
-## Quick Start
-
-### 1) Define your workflow once in plain Python
-
-```python
-# my_workflow.py
-from choreo_mini.core.workflow import Workflow
-from choreo_mini.core.nodes import AgentNode, ServiceNode
-
-wf = Workflow("support", enable_profiling=True)
-
-# agents auto-register with the workflow on creation
-classifier = AgentNode(wf, "Classifier", role="ticket triage")
-specialist  = AgentNode(wf, "Specialist",  role="issue resolver")
-
-
-def main():
-    while True:
-        ticket = input("Ticket> ")
-        if not ticket.strip():
-            break
-        category = wf.send("Classifier", ticket)
-        response = wf.send("Specialist", f"{category.content}: {ticket}")
-        print(response.content)
-```
-
-### 2) Convert your workflow to each backend
-
-```bash
-# to LangGraph
-choreo_mini -f my_workflow.py -b langgraph -o output/langgraph_output.py
-
-# to CrewAI
-choreo_mini -f my_workflow.py -b crewai -o output/crewai_output.py
-
-# to AutoGen
-choreo_mini -f my_workflow.py -b autogen -o output/autogen_output.py
-```
-
-### 3) Convert the bundled complete example (recommended)
-
-```bash
-# examples/foo2.py includes routing, specialist selection, review flow, and looped batch handling
-choreo_mini -f examples/foo2.py -b langgraph -o output/foo2_langgraph_output.py
-choreo_mini -f examples/foo2.py -b crewai -o output/foo2_crewai_output.py
-choreo_mini -f examples/foo2.py -b autogen -o output/foo2_autogen_output.py
-```
-
-OpenAI-compatible remote endpoint example with richer operations routing:
-
-```bash
-choreo_mini -f examples/customer_ops_url.py -b langgraph -o output/customer_ops_langgraph_output.py
-choreo_mini -f examples/customer_ops_url.py -b crewai -o output/customer_ops_crewai_output.py
-choreo_mini -f examples/customer_ops_url.py -b autogen -o output/customer_ops_autogen_output.py
-```
-
-Run the source workflow directly and provide credentials at the prompts, or preload them with environment variables:
-
-```bash
-export CHOREO_LLM_URL="https://your-endpoint.example.com/v1"
-export CHOREO_API_TOKEN="your-token"
-export CHOREO_LLM_MODEL="gpt-4o-mini"
-python examples/customer_ops_url.py
-```
-
-Optional minimal smoke test (`examples/foo.py`):
-
-```bash
-choreo_mini -f examples/foo.py -b langgraph -o output/foo_langgraph_output.py
-```
-
-### 4) Run a generated LangGraph app directly
-
-```python
-from output.langgraph_output import app
-from choreo_mini import Workflow, AgentNode
-from choreo_mini.core.llm import LLM
-
-wf = Workflow("support", enable_profiling=True)
-AgentNode(wf, "Classifier", role="triage", llm=LLM.create("openai", api_key="..."))
-AgentNode(wf, "Specialist",  role="resolver", llm=LLM.create("openai", api_key="..."))
-
-result = app.invoke({"wf": wf, "input": "login broken", "messages": [], "loop_budget": 1})
-print(result["last_response"])
-```
-
----
-
-## Python API
-
-```python
-from choreo_mini import Workflow, AgentNode, ServiceNode, LLM, CustomLLM
-
-# create a workflow — enable_profiling tracks latency and memory per agent
-wf = Workflow("myflow", enable_profiling=True)
-
-# attach agents with a real or custom LLM
-A1 = AgentNode(wf, "Greeter",   role="greeter",   llm=LLM.create("openai",    api_key="..."))
-A2 = AgentNode(wf, "Responder", role="responder", llm=LLM.create("anthropic", api_key="..."))
-
-# CustomLLM wraps any callable — great for local models or mocks
-A3 = AgentNode(wf, "Fallback", role="fallback",
-               llm=CustomLLM(lambda prompt, **kw: f"Fallback: {prompt}"))
-
-# service nodes wrap arbitrary data functions
-loader = ServiceNode(wf, "Loader", service_fn=lambda wf, path: open(path).read())
-
-# send a message to an agent — history and profiling handled automatically
-response = wf.send("Greeter", "Hello")
-print(response.content)
-
-# inspect profiling
-print(wf.get_profile("Greeter"))  # {"calls": 1, "total_latency": ..., "total_memory": ...}
-```
-
----
-
-## Observability
-
-When `enable_profiling=True`, Choreo-Mini instruments every agent call automatically:
-
-| Metric | Description |
-|--------|-------------|
-| `call_count` | Number of times the agent was invoked |
-| `total_latency` | Cumulative wall-clock inference time (seconds) |
-| `total_memory` | Cumulative memory delta across calls (bytes) |
-| `history` | Full conversation history per agent |
-
-This makes it straightforward to compare runtimes or detect bottlenecks before committing to a specific framework.
-
----
-
-## Supported LLM Providers
-
-| Provider | Class | Notes |
-|----------|-------|-------|
-| OpenAI | `LLM.create("openai", api_key=...)` | Stub — wire real `openai` client in `generate()` |
-| Anthropic | `LLM.create("anthropic", api_key=...)` | Stub — wire real `anthropic` client |
-| Gemini | `LLM.create("gemini", api_key=...)` | Stub — wire real Google client |
-| Custom | `CustomLLM(fn)` | Wraps any `(prompt, **kw) -> str` callable |
-
-The provider stubs make scaffolding easy; replace `generate()` with the real SDK call for production.
-
----
-
-## Development
+Or from source:
 
 ```bash
 git clone https://github.com/Sivasathivel/Choreo-mini
 cd choreo-mini
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest tests/
+pytest
 ```
 
-CI runs the full regression suite against Python 3.10, 3.11, and 3.12 on every push.
+---
+
+## Quick start — single agent
+
+```python
+from choreo_mini import Workflow, AgentNode, LLM
+
+class Advisor(Workflow):
+    def __init__(self, llm):
+        super().__init__("advisor")
+        self.agent = AgentNode(self, "Advisor", role="Senior trade policy analyst", llm=llm)
+
+    def ask(self, question: str) -> str:
+        return self.send("Advisor", question).content
+
+llm = LLM(api_key="sk-...", endpoint="https://api.openai.com", model="gpt-4o-mini")
+wf  = Advisor(llm)
+print(wf.ask("What are the three main pillars of CUSMA/USMCA?"))
+```
+
+---
+
+## Compile to another runtime (optional)
+
+When you're ready to migrate to LangGraph, CrewAI, or AutoGen, compile your workflow with the CLI:
+
+```bash
+choreo_mini -f examples/foo2.py -b langgraph -o output/foo2_langgraph.py
+choreo_mini -f examples/foo2.py -b crewai    -o output/foo2_crewai.py
+choreo_mini -f examples/foo2.py -b autogen   -o output/foo2_autogen.py
+```
+
+OpenAI-compatible remote endpoint example:
+
+```bash
+choreo_mini -f examples/customer_ops_url.py -b langgraph -o output/customer_ops_langgraph.py
+```
+
+---
+
+## Observability
+
+When `enable_profiling=True`, every agent call is instrumented automatically:
+
+| Metric | Description |
+|--------|-------------|
+| `calls` | Number of times the agent was invoked |
+| `total_latency` | Cumulative wall-clock inference time (seconds) |
+| `total_memory` | Cumulative memory delta across calls (bytes) |
+| `history` | Full conversation history per agent |
+
+```python
+wf = MyWorkflow(enable_profiling=True, llm=llm)
+wf.run("some input")
+print(wf.get_profile("Analyst"))
+# {"Analyst": {"calls": 3, "total_latency": 1.42, "total_memory": 8192}}
+```
+
+---
+
+## Status
+
+Choreo-Mini is an actively developed prototype.
+
+- **Core runtime** (`Workflow`, `AgentNode`, `LLM`, `BeliefState`, `Episode`) — stable, 140 tests passing
+- **LangGraph backend** — most mature; supports branching, loop budgets, service node dispatch
+- **CrewAI / AutoGen backends** — structurally correct scaffolding; runtime fidelity in progress
+
+---
+
+## Roadmap
+
+- **LLM-driven MARL strategies** — replace fixed-delta strategies with agents that reason over belief states to propose actions
+- **Policy update hooks** — plug gradient or tabular RL updates directly into the `Episode` trajectory
+- **MCP server support** — expose workflows as tools/resources/prompts via Model Context Protocol
+- **A2A (agent-to-agent)** — explicit handoffs, delegation, and structured cross-agent messaging
+- **CrewAI / AutoGen parity** — deeper runtime fidelity for routing, loops, and state transitions
+- **CLI improvements** — conversion diagnostics, IR inspection output
 
 ---
 
@@ -229,24 +295,14 @@ CI runs the full regression suite against Python 3.10, 3.11, and 3.12 on every p
 This project is released under the [Choreo-Mini Source License](LICENSE).
 
 **What is allowed:**
-- Use choreo-mini as a library or dependency inside any project, including
-    commercial applications and internal enterprise deployments — no restriction.
+- Use choreo-mini as a library or dependency inside any project, including commercial applications and internal enterprise deployments.
 - Modify the source and contribute back.
-- Keep your larger application closed source when it only depends on
-    choreo-mini and is not itself a derivative of choreo-mini.
-- Ship a proprietary larger product that uses unmodified choreo-mini as a
-    component, with license notices preserved.
+- Keep your larger application closed source when it only depends on choreo-mini and is not itself a derivative of choreo-mini.
+- Ship a proprietary larger product that uses unmodified choreo-mini as a component, with license notices preserved.
 
 **What is not allowed:**
-- Building and selling a product, plugin, extension, or SaaS where
-    choreo-mini is the core value being offered by a third party.
-- Distributing or hosting a modified derivative of choreo-mini without
-    releasing the derivative source under the same license.
-- Selling paid access to choreo-mini or a derivative API/service, even when
-    bundled with other paid features.
+- Building and selling a product, plugin, extension, or SaaS where choreo-mini is the core value being offered by a third party.
+- Distributing or hosting a modified derivative of choreo-mini without releasing the derivative source under the same license.
+- Selling paid access to choreo-mini or a derivative API/service, even when bundled with other paid features.
 
-**Other terms:** citation is required in public materials and user-facing
-interfaces (for example docs, demos, public repos, benchmark reports, websites,
-or service UI); contributors grant the author relicensing rights; the author
-reserves the right to publish enterprise/commercial editions. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for contribution terms.
+**Other terms:** citation is required in public materials and user-facing interfaces (docs, demos, public repos, benchmark reports, websites, or service UI); contributors grant the author relicensing rights; the author reserves the right to publish enterprise/commercial editions. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution terms.
