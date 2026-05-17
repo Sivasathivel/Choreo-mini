@@ -5,6 +5,7 @@ from choreo_mini.core.workflow import Workflow, AgentState
 from choreo_mini.core.nodes import AgentNode, ServiceNode
 from choreo_mini.core.llm import LLM, CustomLLM, Message, ToolSchema, ToolCallRequest, ToolCallMessage
 from choreo_mini.core.episode import Episode, EpisodeStep, nash_convergence_detector, max_rounds_terminator
+from choreo_mini.core.mcp_server import WorkflowMCPServer
 
 __version__ = "0.2.0"
 __author__ = "Sivasathivel Kandasamy"
@@ -31,4 +32,6 @@ __all__ = [
     "EpisodeStep",
     "nash_convergence_detector",
     "max_rounds_terminator",
+    # MCP server
+    "WorkflowMCPServer",
 ]
