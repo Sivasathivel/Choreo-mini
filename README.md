@@ -1,5 +1,10 @@
 # Choreo-Mini
 
+[![CI](https://github.com/Sivasathivel/Choreo-mini/actions/workflows/ci.yml/badge.svg)](https://github.com/Sivasathivel/Choreo-mini/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/choreo-mini)](https://pypi.org/project/choreo-mini/)
+[![Python versions](https://img.shields.io/pypi/pyversions/choreo-mini)](https://pypi.org/project/choreo-mini/)
+[![License](https://img.shields.io/badge/license-Choreo--Mini--1.2-blue)](LICENSE)
+
 **A lightweight Python meta-framework for building, experimenting with, and orchestrating LLM-based agents.**
 
 Modern agent frameworks — LangGraph, CrewAI, AutoGen — each solve similar orchestration problems but introduce fragmented abstractions and steep learning curves. Choreo-Mini provides a Python-native developer experience that lets you prototype agent workflows quickly, run genuine multi-agent experiments, and compile to any target runtime when you're ready.
@@ -306,7 +311,7 @@ What gets registered automatically:
 
 Choreo-Mini is an actively developed prototype.
 
-- **Core runtime** (`Workflow`, `AgentNode`, `LLM`, `BeliefState`, `Episode`) — stable, 165 tests passing
+- **Core runtime** (`Workflow`, `AgentNode`, `LLM`, `BeliefState`, `Episode`) — stable, 165 tests passing across Python 3.10–3.13
 - **MCP client + server** — consume external MCP servers and expose workflows as MCP servers
 - **LangGraph backend** — most mature; supports branching, loop budgets, service node dispatch
 - **CrewAI / AutoGen backends** — structurally correct scaffolding; runtime fidelity in progress
