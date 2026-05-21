@@ -263,11 +263,51 @@ print(wf.get_profile("Analyst"))
 
 ---
 
+## MCP server — expose your workflow to any MCP client
+
+`WorkflowMCPServer` wraps any `Workflow` and makes it instantly accessible from
+Claude Desktop, other choreo-mini workflows, or any MCP-compatible client —
+with zero extra configuration.
+
+```python
+from choreo_mini import WorkflowMCPServer
+
+server = WorkflowMCPServer(my_workflow, host="0.0.0.0", port=8000)
+
+server.serve_sse()          # HTTP SSE — accessible over a network
+server.serve_stdio()        # stdio — for Claude Desktop / subprocess
+app = server.sse_app()      # raw Starlette ASGI app for custom uvicorn
+```
+
+What gets registered automatically:
+
+| MCP concept | What it is |
+|-------------|-----------|
+| **Tool** per `AgentNode` | Sends a message to that agent and returns its reply |
+| **Resource** `workflow://{name}/beliefs` | Live JSON snapshot of workflow belief state |
+| **Resource** `workflow://{name}/agents/{agent}/history` | Full conversation history |
+
+**Claude Desktop config** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "my-workflow": {
+      "command": "python",
+      "args": ["-m", "my_package.mcp_entrypoint"]
+    }
+  }
+}
+```
+
+---
+
 ## Status
 
 Choreo-Mini is an actively developed prototype.
 
-- **Core runtime** (`Workflow`, `AgentNode`, `LLM`, `BeliefState`, `Episode`) — stable, 140 tests passing
+- **Core runtime** (`Workflow`, `AgentNode`, `LLM`, `BeliefState`, `Episode`) — stable, 165 tests passing
+- **MCP client + server** — consume external MCP servers and expose workflows as MCP servers
 - **LangGraph backend** — most mature; supports branching, loop budgets, service node dispatch
 - **CrewAI / AutoGen backends** — structurally correct scaffolding; runtime fidelity in progress
 
@@ -275,9 +315,10 @@ Choreo-Mini is an actively developed prototype.
 
 ## Roadmap
 
+- **Developer documentation** — full API reference, tutorials, and architecture guide
 - **LLM-driven MARL strategies** — replace fixed-delta strategies with agents that reason over belief states to propose actions
 - **Policy update hooks** — plug gradient or tabular RL updates directly into the `Episode` trajectory
-- **MCP server support** — expose workflows as tools/resources/prompts via Model Context Protocol
+- **Expanded test coverage** — integration tests against real MCP servers, end-to-end conversion pipeline tests
 - **A2A (agent-to-agent)** — explicit handoffs, delegation, and structured cross-agent messaging
 - **CrewAI / AutoGen parity** — deeper runtime fidelity for routing, loops, and state transitions
 - **CLI improvements** — conversion diagnostics, IR inspection output
