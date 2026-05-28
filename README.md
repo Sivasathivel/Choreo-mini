@@ -240,11 +240,69 @@ choreo_mini -f examples/foo2.py -b crewai    -o output/foo2_crewai.py
 choreo_mini -f examples/foo2.py -b autogen   -o output/foo2_autogen.py
 ```
 
-OpenAI-compatible remote endpoint example:
+Full customer-operations example (four-way routing, risk escalation, QA review):
 
 ```bash
-choreo_mini -f examples/customer_ops_url.py -b langgraph -o output/customer_ops_langgraph.py
+choreo_mini -f examples/customer_ops_url.py -b langgraph \
+            -o output/customer_ops_langgraph.py
 ```
+
+---
+
+## Conversion guide — which pattern to use
+
+Choreo-Mini supports two authoring styles.  Choose the right one for your use case:
+
+| | Flat / functional | **Subclass (recommended)** |
+|---|---|---|
+| **How** | `wf = Workflow(...)` inside `main()` | `class X(Workflow)` with `__init__` + methods |
+| **Run directly** | ✓ | ✓ |
+| **Compile to LangGraph / CrewAI / AutoGen** | ✗ | ✓ |
+| **Best for** | Quick scripts, one-off experiments | Shareable, reusable, production workflows |
+
+### Subclass pattern (correct conversion target)
+
+```python
+class TicketTriageWorkflow(Workflow):
+    def __init__(self):
+        super().__init__("ticket_triage", enable_profiling=True)
+        # Declare all agents in __init__
+        self.classifier = AgentNode(self, "Classifier", role="triage classifier", llm=...)
+        self.reviewer   = AgentNode(self, "Reviewer",   role="quality reviewer",  llm=...)
+
+    def process_batch(self, raw_batch: str) -> list:
+        # Execution logic in a method — this is what gets compiled
+        tickets = raw_batch.split(";")
+        results = []
+        for ticket in tickets:
+            route = self.send("Classifier", ticket).content.strip().lower()
+            final = self.send("Reviewer", route).content
+            results.append(final)
+        return results
+
+# Run directly
+wf = TicketTriageWorkflow()
+wf.process_batch("billing question; app crash")
+
+# Or compile to LangGraph
+# choreo_mini -f myfile.py -b langgraph -o output/graph.py
+```
+
+### Flat pattern (run directly only)
+
+```python
+def main():
+    wf = Workflow("my_workflow")
+    agent = AgentNode(wf, "Agent", role="...", llm=...)
+
+    response = wf.send("Agent", "hello")
+    print(response.content)
+
+# python myfile.py  ← works fine
+# choreo_mini -f myfile.py -b langgraph  ← NOT supported
+```
+
+> **Rule of thumb**: if you ever plan to compile your workflow, use the subclass pattern from the start.  It runs identically to the flat pattern at development time and unlocks compilation later.
 
 ---
 

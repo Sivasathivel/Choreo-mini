@@ -90,7 +90,7 @@ def _load_module(module_path: Path, module_name: str):
 
 def _build_demo_workflow():
     example = _load_module(EXAMPLE_PATH, "customer_ops_url_runtime")
-    wf, *_ = example.build_customer_ops_workflow(demo_mode=True)
+    wf = example.CustomerOpsWorkflow(demo_mode=True)
     return wf, example.EXAMPLE_BATCH
 
 
