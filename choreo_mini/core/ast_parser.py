@@ -2,24 +2,388 @@
 
 Analyzes Python code to extract workflow definitions, nodes, and execution
 logic for conversion to other frameworks.
+
+Two source patterns are supported:
+
+**Subclass pattern (preferred — each class = one LangGraph subgraph)**::
+
+    class MyFlow(Workflow):
+        def __init__(self):
+            super().__init__("my_flow", enable_profiling=True)
+            self.agent = AgentNode(self, "Agent", role="...", llm=...)
+
+        def run(self, text: str) -> str:
+            return self.send("Agent", text).content
+
+**Flat / functional pattern (legacy fallback)**::
+
+    def main():
+        wf = Workflow("my_flow")
+        agent = AgentNode(wf, "Agent", role="...", llm=...)
+        resp = wf.send("Agent", input("You> "))
+
+When a subclass is present it takes precedence; ``main()`` / module-level
+scanning is only used when no subclass is found.
 """
 
 import ast
 from typing import Dict, Any, List, Optional
 
 
+# ---------------------------------------------------------------------------
+# Low-level helpers (shared by both paths)
+# ---------------------------------------------------------------------------
+
+def _get_full_name(node: ast.AST) -> str:
+    """Return a dot-separated name for Name/Attribute AST nodes."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _get_full_name(node.value)
+        return f"{base}.{node.attr}" if base else node.attr
+    return ""
+
+
+def _format_expr(node: ast.AST) -> str:
+    """Format an AST expression as source code."""
+    if isinstance(node, ast.Constant):
+        return repr(node.value)
+    if isinstance(node, ast.Name):
+        return node.id
+    if hasattr(ast, "unparse"):
+        return ast.unparse(node)
+    return str(node)
+
+
+def _extract_expr(node: ast.AST) -> str:
+    if hasattr(ast, "unparse"):
+        return ast.unparse(node)
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Constant):
+        return repr(node.value)
+    return str(node)
+
+
+def _extract_call(node: ast.Call) -> Dict[str, Any]:
+    func_name = ""
+    if isinstance(node.func, ast.Name):
+        func_name = node.func.id
+    elif isinstance(node.func, ast.Attribute):
+        func_name = _get_full_name(node.func)
+
+    args = [_format_expr(arg) for arg in node.args]
+    kwargs = {}
+    for kw in node.keywords:
+        kwargs[kw.arg] = _format_expr(kw.value)
+    return {"func": func_name, "args": args, "kwargs": kwargs}
+
+
+def _extract_call_from_expr(node: ast.AST) -> Optional[ast.Call]:
+    """Unwrap expressions like call().attr and return the underlying call."""
+    current = node
+    while isinstance(current, (ast.Attribute, ast.Subscript)):
+        current = current.value
+    if isinstance(current, ast.Call):
+        return current
+    return None
+
+
+def _extract_result_accessor(node: ast.AST) -> List[Dict[str, str]]:
+    accessor: List[Dict[str, str]] = []
+    current = node
+    while not isinstance(current, ast.Call):
+        if isinstance(current, ast.Attribute):
+            accessor.append({"kind": "attr", "value": current.attr})
+            current = current.value
+            continue
+        if isinstance(current, ast.Subscript):
+            accessor.append({"kind": "subscript", "value": _format_expr(current.slice)})
+            current = current.value
+            continue
+        return []
+    accessor.reverse()
+    return accessor
+
+
+def _extract_dict(node: ast.Dict) -> Dict[str, Any]:
+    result = {}
+    for key, value in zip(node.keys, node.values):
+        if isinstance(key, ast.Constant) and isinstance(value, ast.Constant):
+            result[key.value] = value.value
+    return result
+
+
+def _is_workflow_call(call: ast.Call, known_node_vars: set) -> bool:
+    """Return True if *call* is a send/execute/input call relevant to the workflow."""
+    info = _extract_call(call)
+    func = info.get("func", "")
+    if not func:
+        return False
+    if func == "input":
+        return True
+    if func.endswith(".send"):
+        return True
+    if func.endswith(".execute"):
+        base = func.rsplit(".", 1)[0]
+        # Match "self.ticket_loader" → strip "self." prefix for comparison
+        bare = base[len("self."):] if base.startswith("self.") else base
+        if bare in known_node_vars or base in known_node_vars:
+            return True
+        return True  # any .execute() is considered workflow-relevant
+    return False
+
+
+def _call_from_stmt(stmt: ast.stmt) -> Optional[ast.Call]:
+    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+        return stmt.value
+    if isinstance(stmt, ast.Assign):
+        return _extract_call_from_expr(stmt.value)
+    return None
+
+
+def _extract_body(
+    body: List[ast.stmt],
+    known_node_vars: set,
+    capture_assignments: bool = False,
+) -> List[Dict[str, Any]]:
+    """Recursively extract execution-logic entries from a statement list."""
+    result = []
+    for stmt in body:
+        call_node = _call_from_stmt(stmt)
+        if call_node is not None and _is_workflow_call(call_node, known_node_vars):
+            call_entry: Dict[str, Any] = {"type": "call", "call": _extract_call(call_node)}
+            if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+                target = stmt.targets[0]
+                if isinstance(target, ast.Name):
+                    call_entry["assign_to"] = target.id
+                else:
+                    call_entry["assign_target_expr"] = _format_expr(target)
+                accessor = _extract_result_accessor(stmt.value)
+                if accessor:
+                    call_entry["result_accessor"] = accessor
+            result.append(call_entry)
+
+        elif isinstance(stmt, ast.Assign):
+            if capture_assignments and len(stmt.targets) == 1:
+                result.append({
+                    "type": "assign",
+                    "target_expr": _format_expr(stmt.targets[0]),
+                    "expr": _format_expr(stmt.value),
+                })
+
+        elif isinstance(stmt, ast.AugAssign):
+            if capture_assignments:
+                result.append({
+                    "type": "augassign",
+                    "target_expr": _format_expr(stmt.target),
+                    "op": stmt.op.__class__.__name__,
+                    "expr": _format_expr(stmt.value),
+                })
+
+        elif isinstance(stmt, ast.If):
+            body_logic = _extract_body(stmt.body, known_node_vars, capture_assignments=True)
+            orelse_logic = _extract_body(stmt.orelse, known_node_vars, capture_assignments=True) if stmt.orelse else []
+            if body_logic or orelse_logic:
+                result.append({
+                    "type": "if",
+                    "condition": _extract_expr(stmt.test),
+                    "body": body_logic,
+                    "orelse": orelse_logic,
+                })
+
+        elif isinstance(stmt, ast.For):
+            body_logic = _extract_body(stmt.body, known_node_vars, capture_assignments=True)
+            orelse_logic = _extract_body(stmt.orelse, known_node_vars, capture_assignments=True) if stmt.orelse else []
+            if body_logic or orelse_logic:
+                result.append({
+                    "type": "for_loop",
+                    "iter_var": _format_expr(stmt.target),
+                    "iter_expr": _format_expr(stmt.iter),
+                    "body": body_logic,
+                    "orelse": orelse_logic,
+                })
+
+        elif isinstance(stmt, ast.While):
+            body_logic = _extract_body(stmt.body, known_node_vars, capture_assignments=True)
+            orelse_logic = _extract_body(stmt.orelse, known_node_vars, capture_assignments=True) if stmt.orelse else []
+            if body_logic or orelse_logic:
+                if isinstance(stmt.test, ast.Constant) and stmt.test.value is True:
+                    result.append({
+                        "type": "infinite_loop",
+                        "body": body_logic,
+                        "orelse": orelse_logic,
+                    })
+                else:
+                    result.append({
+                        "type": "while_loop",
+                        "condition": _extract_expr(stmt.test),
+                        "body": body_logic,
+                        "orelse": orelse_logic,
+                    })
+
+        elif isinstance(stmt, ast.Try):
+            result.extend(_extract_body(stmt.body, known_node_vars, capture_assignments))
+
+        elif isinstance(stmt, ast.Break):
+            result.append({"type": "break"})
+
+        elif isinstance(stmt, ast.Continue):
+            result.append({"type": "continue"})
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Subclass extractor
+# ---------------------------------------------------------------------------
+
+def _extract_node_from_assign(stmt: ast.Assign) -> Optional[Dict[str, Any]]:
+    """Return node_data if stmt is an AgentNode/ServiceNode assignment, else None."""
+    if not (len(stmt.targets) == 1 and isinstance(stmt.value, ast.Call)):
+        return None
+
+    # Both `self.x = AgentNode(...)` and `x = AgentNode(...)` forms
+    target = stmt.targets[0]
+    if isinstance(target, ast.Attribute):
+        var_name = target.attr
+    elif isinstance(target, ast.Name):
+        var_name = target.id
+    else:
+        return None
+
+    call = stmt.value
+    func_name = ""
+    if isinstance(call.func, ast.Name):
+        func_name = call.func.id
+    elif isinstance(call.func, ast.Attribute):
+        func_name = call.func.attr
+
+    if func_name not in ("AgentNode", "ServiceNode"):
+        return None
+
+    node_data: Dict[str, Any] = {
+        "var_name": var_name,
+        "type": func_name,
+        "args": [],
+        "kwargs": {},
+        "runtime_name_expr": _format_expr(call.args[1]) if len(call.args) >= 2 else repr(var_name),
+    }
+    for arg in call.args:
+        node_data["args"].append(_format_expr(arg))
+    for kw in call.keywords:
+        if isinstance(kw.value, ast.Dict):
+            node_data["kwargs"][kw.arg] = _extract_dict(kw.value)
+        else:
+            node_data["kwargs"][kw.arg] = _format_expr(kw.value)
+    return node_data
+
+
+def _workflow_name_from_super_init(init_body: List[ast.stmt]) -> tuple:
+    """Scan __init__ body for super().__init__(name, enable_profiling=...).
+
+    Returns (workflow_name, enable_profiling).
+    """
+    for stmt in init_body:
+        if not isinstance(stmt, ast.Expr):
+            continue
+        call = stmt.value
+        if not isinstance(call, ast.Call):
+            continue
+        func = call.func
+        # super().__init__(...)
+        is_super_init = (
+            isinstance(func, ast.Attribute)
+            and func.attr == "__init__"
+            and isinstance(func.value, ast.Call)
+            and isinstance(func.value.func, ast.Name)
+            and func.value.func.id == "super"
+        )
+        if not is_super_init:
+            continue
+        wf_name: Optional[str] = None
+        if call.args and isinstance(call.args[0], ast.Constant):
+            wf_name = call.args[0].value
+        enable_prof = False
+        for kw in call.keywords:
+            if kw.arg == "enable_profiling" and isinstance(kw.value, ast.Constant):
+                enable_prof = bool(kw.value.value)
+        return wf_name, enable_prof
+    return None, False
+
+
+def _extract_workflow_subclass(class_node: ast.ClassDef) -> Dict[str, Any]:
+    """Extract all workflow data from a single Workflow subclass definition.
+
+    Returns a dict with:
+      class_name, workflow_name, enable_profiling, nodes,
+      primary_method, execution_logic, methods
+    """
+    nodes: List[Dict[str, Any]] = []
+    workflow_name: Optional[str] = None
+    enable_profiling: bool = False
+    methods: Dict[str, Dict[str, Any]] = {}
+
+    for item in class_node.body:
+        if not isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+
+        method_name = item.name
+        method_args = [arg.arg for arg in item.args.args if arg.arg != "self"]
+
+        if method_name == "__init__":
+            # Extract workflow name + enable_profiling from super().__init__
+            wf_name, ep = _workflow_name_from_super_init(item.body)
+            if wf_name:
+                workflow_name = wf_name
+            if ep:
+                enable_profiling = ep
+
+            # Extract AgentNode / ServiceNode assignments from __init__
+            for stmt in ast.walk(item):
+                if isinstance(stmt, ast.Assign):
+                    nd = _extract_node_from_assign(stmt)
+                    if nd is not None:
+                        nodes.append(nd)
+        else:
+            # Non-__init__ method: extract its execution logic
+            known_vars = {nd["var_name"] for nd in nodes}
+            logic = _extract_body(item.body, known_vars, capture_assignments=True)
+            if logic:
+                methods[method_name] = {
+                    "args": method_args,
+                    "execution_logic": logic,
+                }
+
+    # Pick the primary method: first non-__init__ method that has execution logic
+    primary_method: Optional[str] = next(iter(methods), None)
+    primary_logic = methods[primary_method]["execution_logic"] if primary_method else []
+
+    return {
+        "class_name": class_node.name,
+        "workflow_name": workflow_name or class_node.name,
+        "enable_profiling": enable_profiling,
+        "nodes": nodes,
+        "primary_method": primary_method,
+        "execution_logic": primary_logic,
+        "methods": methods,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Legacy flat-pattern visitor (used when no subclass is found)
+# ---------------------------------------------------------------------------
+
 class WorkflowVisitor(ast.NodeVisitor):
-    """AST visitor to extract workflow components from choreo-mini code."""
+    """AST visitor to extract workflow components from flat (non-subclass) code."""
 
     def __init__(self):
         self.workflow_name: Optional[str] = None
         self.enable_profiling: bool = False
         self.nodes: List[Dict[str, Any]] = []
-        self.execution_logic: List[Dict[str, Any]] = []
         self.imports: List[str] = []
-        self.assignments: List[Dict[str, str]] = []  # preserve top-level assignments (e.g., wf, llm) for reconstruction
+        self.assignments: List[Dict[str, str]] = []
         self._scope_depth: int = 0
-        # Track class names that subclass Workflow (directly or transitively)
         self._workflow_subclasses: set = {"Workflow"}
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
@@ -33,13 +397,12 @@ class WorkflowVisitor(ast.NodeVisitor):
         self._scope_depth -= 1
 
     def visit_ClassDef(self, node: ast.ClassDef):
-        """Track classes that subclass Workflow (or any known Workflow subclass)."""
         for base in node.bases:
             base_name = ""
             if isinstance(base, ast.Name):
                 base_name = base.id
             elif isinstance(base, ast.Attribute):
-                base_name = self._get_full_name(base)
+                base_name = _get_full_name(base)
             if base_name in self._workflow_subclasses:
                 self._workflow_subclasses.add(node.name)
                 break
@@ -61,7 +424,7 @@ class WorkflowVisitor(ast.NodeVisitor):
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             var_name = node.targets[0].id
 
-        # Look for Workflow instantiation (direct or subclass)
+        # Detect Workflow / subclass instantiation
         if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name):
             if node.value.func.id in self._workflow_subclasses and var_name:
                 kwargs = {kw.arg: kw.value for kw in node.value.keywords if kw.arg}
@@ -69,14 +432,14 @@ class WorkflowVisitor(ast.NodeVisitor):
                 if "enable_profiling" in kwargs and isinstance(kwargs["enable_profiling"], ast.Constant):
                     self.enable_profiling = kwargs["enable_profiling"].value
 
-        # Preserve only module-level assignments for optional reconstruction templates.
+        # Module-level assignments (for reconstruction templates)
         if self._scope_depth == 0 and var_name and isinstance(node.value, ast.Call):
             self.assignments.append({
                 "target": var_name,
-                "expr": self._format_expr(node.value),
+                "expr": _format_expr(node.value),
             })
 
-        # Look for AgentNode/ServiceNode instantiations
+        # AgentNode / ServiceNode
         if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name):
             func_name = node.value.func.id
             if func_name in ("AgentNode", "ServiceNode"):
@@ -85,317 +448,133 @@ class WorkflowVisitor(ast.NodeVisitor):
                     "type": func_name,
                     "args": [],
                     "kwargs": {},
-                    "runtime_name_expr": self._format_expr(node.value.args[1]) if len(node.value.args) >= 2 else repr(var_name or "node"),
+                    "runtime_name_expr": _format_expr(node.value.args[1]) if len(node.value.args) >= 2 else repr(var_name or "node"),
                 }
-
-                # Extract arguments
                 for arg in node.value.args:
-                    node_data["args"].append(self._format_expr(arg))
-
+                    node_data["args"].append(_format_expr(arg))
                 for kw in node.value.keywords:
                     if isinstance(kw.value, ast.Dict):
-                        # Handle dict arguments like properties
-                        node_data["kwargs"][kw.arg] = self._extract_dict(kw.value)
+                        node_data["kwargs"][kw.arg] = _extract_dict(kw.value)
                     else:
-                        node_data["kwargs"][kw.arg] = self._format_expr(kw.value)
-
+                        node_data["kwargs"][kw.arg] = _format_expr(kw.value)
                 self.nodes.append(node_data)
 
-        # Capture assigned call results, e.g., resp = wf.send("Greeter", text)
-        # and wrapped variants like resp = wf.send(...).content
-        assigned_call = self._extract_call_from_expr(node.value)
-        if assigned_call is not None and self._is_workflow_relevant_call(assigned_call):
-            call_entry: Dict[str, Any] = {
-                "type": "call",
-                "call": self._extract_call(assigned_call),
-            }
-            if var_name:
-                call_entry["assign_to"] = var_name
-            self.execution_logic.append(call_entry)
-
         self.generic_visit(node)
 
-    def visit_While(self, node: ast.While):
-        # Look for main execution loop
-        if isinstance(node.test, ast.Constant) and node.test.value is True:
-            # Infinite loop
-            self.execution_logic.append({"type": "infinite_loop", "body": self._extract_body(node.body)})
-        self.generic_visit(node)
 
-    def visit_For(self, node: ast.For):
-        body_calls = self._extract_calls_from_stmts(node.body)
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
-        if self._contains_workflow_call(body_calls):
-            iter_var = None
-            if isinstance(node.target, ast.Name):
-                iter_var = node.target.id
-            elif isinstance(node.target, ast.Attribute):
-                iter_var = self._get_full_name(node.target)
-            else:
-                iter_var = self._format_expr(node.target)
-
-            self.execution_logic.append({
-                "type": "for_loop",
-                "iter_var": iter_var,
-                "iter_expr": self._format_expr(node.iter),
-                "body": self._extract_body(node.body)
-            })
-
-        self.generic_visit(node)
-
-    def visit_If(self, node: ast.If):
-        body_calls = self._extract_calls_from_stmts(node.body)
-        orelse_calls = self._extract_calls_from_stmts(node.orelse)
-
-        if self._contains_workflow_call(body_calls) or self._contains_workflow_call(orelse_calls):
-            condition = self._extract_expr(node.test)
-            self.execution_logic.append({
-                "type": "if",
-                "condition": condition,
-                "body": self._extract_body(node.body),
-                "orelse": self._extract_body(node.orelse) if node.orelse else []
-            })
-
-        self.generic_visit(node)
-
-    def visit_Expr(self, node: ast.Expr):
-        if isinstance(node.value, ast.Call):
-            call_info = self._extract_call(node.value)
-            if self._is_workflow_relevant_call(node.value):
-                self.execution_logic.append({"type": "call", "call": call_info})
-        self.generic_visit(node)
-
-    def _call_from_stmt(self, stmt: ast.stmt) -> Optional[ast.Call]:
-        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
-            return stmt.value
-        if isinstance(stmt, ast.Assign):
-            return self._extract_call_from_expr(stmt.value)
-        return None
-
-    def _extract_call_from_expr(self, node: ast.AST) -> Optional[ast.Call]:
-        """Unwrap expressions like call().attr and return the underlying call."""
-        current = node
-        while isinstance(current, (ast.Attribute, ast.Subscript)):
-            current = current.value
-        if isinstance(current, ast.Call):
-            return current
-        return None
-
-    def _extract_calls_from_stmts(self, statements: List[ast.stmt]) -> List[ast.Call]:
-        calls: List[ast.Call] = []
-        for stmt in statements:
-            call_node = self._call_from_stmt(stmt)
-            if call_node is not None:
-                calls.append(call_node)
-        return calls
-
-    def _contains_workflow_call(self, calls: List[ast.Call]) -> bool:
-        for call in calls:
-            if self._is_workflow_relevant_call(call):
-                return True
-        return False
-
-    def _is_workflow_relevant_call(self, call: ast.Call) -> bool:
-        call_info = self._extract_call(call)
-        func = call_info.get("func", "")
-        if not func:
-            return False
-
-        if func == "input":
-            return True
-
-        if self.workflow_name and func == f"{self.workflow_name}.send":
-            return True
-        if func.endswith(".send"):
-            return True
-
-        if func.endswith(".execute"):
-            base = func.rsplit(".", 1)[0]
-            for node_data in self.nodes:
-                if node_data.get("var_name") == base:
-                    return True
-            return True
-
-        return False
-
-    def _extract_dict(self, node: ast.Dict) -> Dict[str, Any]:
-        result = {}
-        for key, value in zip(node.keys, node.values):
-            if isinstance(key, ast.Constant) and isinstance(value, ast.Constant):
-                result[key.value] = value.value
-        return result
-
-    def _get_full_name(self, node: ast.AST) -> str:
-        """Return a dot-separated name for Name/Attribute AST nodes."""
-        if isinstance(node, ast.Name):
-            return node.id
-        if isinstance(node, ast.Attribute):
-            base = self._get_full_name(node.value)
-            return f"{base}.{node.attr}" if base else node.attr
-        return ""
-
-    def _format_expr(self, node: ast.AST) -> str:
-        """Format an AST expression as source code."""
-        if isinstance(node, ast.Constant):
-            return repr(node.value)
-        if isinstance(node, ast.Name):
-            return node.id
-        # ast.unparse is available in Python 3.9+
-        if hasattr(ast, "unparse"):
-            return ast.unparse(node)
-        return str(node)
-
-    def _extract_call(self, node: ast.Call) -> Dict[str, Any]:
-        func_name = ""
-        if isinstance(node.func, ast.Name):
-            func_name = node.func.id
-        elif isinstance(node.func, ast.Attribute):
-            func_name = self._get_full_name(node.func)
-
-        args = [self._format_expr(arg) for arg in node.args]
-
-        kwargs = {}
-        for kw in node.keywords:
-            kwargs[kw.arg] = self._format_expr(kw.value)
-
-        return {"func": func_name, "args": args, "kwargs": kwargs}
-
-    def _extract_expr(self, node: ast.AST) -> str:
-        if hasattr(ast, "unparse"):
-            return ast.unparse(node)
-        if isinstance(node, ast.Name):
-            return node.id
-        if isinstance(node, ast.Constant):
-            return repr(node.value)
-        return ast.unparse(node) if hasattr(ast, 'unparse') else str(node)
-
-    def _extract_result_accessor(self, node: ast.AST) -> List[Dict[str, str]]:
-        accessor: List[Dict[str, str]] = []
-        current = node
-
-        while not isinstance(current, ast.Call):
-            if isinstance(current, ast.Attribute):
-                accessor.append({"kind": "attr", "value": current.attr})
-                current = current.value
+def _find_workflow_subclasses(tree: ast.Module) -> List[ast.ClassDef]:
+    """Return all ClassDef nodes that (directly or transitively) inherit Workflow."""
+    known: set = {"Workflow"}
+    result: List[ast.ClassDef] = []
+    # Two-pass to handle transitive inheritance
+    for _ in range(2):
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
                 continue
-
-            if isinstance(current, ast.Subscript):
-                accessor.append({"kind": "subscript", "value": self._format_expr(current.slice)})
-                current = current.value
-                continue
-
-            return []
-
-        accessor.reverse()
-        return accessor
-
-    def _extract_body(self, body: List[ast.stmt], capture_assignments: bool = False) -> List[Dict[str, Any]]:
-        # Extract key statements from a block.
-        result = []
-        for stmt in body:
-            call_node = self._call_from_stmt(stmt)
-            if call_node is not None and self._is_workflow_relevant_call(call_node):
-                call_entry: Dict[str, Any] = {"type": "call", "call": self._extract_call(call_node)}
-                if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
-                    target = stmt.targets[0]
-                    if isinstance(target, ast.Name):
-                        call_entry["assign_to"] = target.id
-                    else:
-                        call_entry["assign_target_expr"] = self._format_expr(target)
-
-                    accessor = self._extract_result_accessor(stmt.value)
-                    if accessor:
-                        call_entry["result_accessor"] = accessor
-
-                result.append(call_entry)
-            elif isinstance(stmt, ast.Assign):
-                if capture_assignments and len(stmt.targets) == 1:
-                    result.append({
-                        "type": "assign",
-                        "target_expr": self._format_expr(stmt.targets[0]),
-                        "expr": self._format_expr(stmt.value),
-                    })
-            elif isinstance(stmt, ast.AugAssign):
-                if capture_assignments:
-                    result.append({
-                        "type": "augassign",
-                        "target_expr": self._format_expr(stmt.target),
-                        "op": stmt.op.__class__.__name__,
-                        "expr": self._format_expr(stmt.value),
-                    })
-            elif isinstance(stmt, ast.If):
-                body_logic = self._extract_body(stmt.body, capture_assignments=True)
-                orelse_logic = self._extract_body(stmt.orelse, capture_assignments=True) if stmt.orelse else []
-                if body_logic or orelse_logic:
-                    result.append({
-                        "type": "if",
-                        "condition": self._extract_expr(stmt.test),
-                        "body": body_logic,
-                        "orelse": orelse_logic,
-                    })
-            elif isinstance(stmt, ast.For):
-                body_logic = self._extract_body(stmt.body, capture_assignments=True)
-                orelse_logic = self._extract_body(stmt.orelse, capture_assignments=True) if stmt.orelse else []
-                if body_logic or orelse_logic:
-                    result.append({
-                        "type": "for_loop",
-                        "iter_var": self._format_expr(stmt.target),
-                        "iter_expr": self._format_expr(stmt.iter),
-                        "body": body_logic,
-                        "orelse": orelse_logic,
-                    })
-            elif isinstance(stmt, ast.While):
-                body_logic = self._extract_body(stmt.body, capture_assignments=True)
-                orelse_logic = self._extract_body(stmt.orelse, capture_assignments=True) if stmt.orelse else []
-                if body_logic or orelse_logic:
-                    if isinstance(stmt.test, ast.Constant) and stmt.test.value is True:
-                        result.append({
-                            "type": "infinite_loop",
-                            "body": body_logic,
-                            "orelse": orelse_logic,
-                        })
-                    else:
-                        result.append({
-                            "type": "while_loop",
-                            "condition": self._extract_expr(stmt.test),
-                            "body": body_logic,
-                            "orelse": orelse_logic,
-                        })
-            elif isinstance(stmt, ast.Try):
-                result.extend(self._extract_body(stmt.body, capture_assignments=capture_assignments))
-            elif isinstance(stmt, ast.Break):
-                result.append({"type": "break"})
-            elif isinstance(stmt, ast.Continue):
-                result.append({"type": "continue"})
-        return result
+            for base in node.bases:
+                base_name = ""
+                if isinstance(base, ast.Name):
+                    base_name = base.id
+                elif isinstance(base, ast.Attribute):
+                    base_name = _get_full_name(base)
+                if base_name in known:
+                    known.add(node.name)
+                    if node not in result:
+                        result.append(node)
+                    break
+    return result
 
 
 def parse_workflow_code(code: str, enable_profiling: bool = False) -> Dict[str, Any]:
     """Parse choreo-mini workflow code and extract components.
 
-    Returns a dictionary with workflow data suitable for template rendering.
+    Prefers the *subclass pattern* (``class X(Workflow): ...``).
+    Falls back to the flat ``main()`` / module-level pattern for legacy code.
+
+    Returns a dictionary suitable for Jinja2 template rendering:
+
+    ``workflow_name``
+        String name passed to ``Workflow.__init__`` / ``super().__init__``.
+    ``class_name``
+        Python class name (subclass pattern) or ``None`` (flat pattern).
+    ``enable_profiling``
+        Boolean.
+    ``nodes``
+        List of AgentNode / ServiceNode dicts.
+    ``execution_logic``
+        Structured list of call / assign / loop / if entries.
+    ``workflow_subclasses``
+        List of per-class dicts — one per detected ``Workflow`` subclass.
+        Empty for the flat pattern.
+    ``imports`` / ``assignments``
+        Module-level imports and top-level assignments.
     """
     tree = ast.parse(code)
+
+    # --- collect imports and module-level assignments via the visitor ---
     visitor = WorkflowVisitor()
     visitor.visit(tree)
 
+    # Override profiling flag if requested via CLI
+    if enable_profiling:
+        visitor.enable_profiling = True
+
+    # --- try subclass pattern first ---
+    subclass_nodes = _find_workflow_subclasses(tree)
+    if subclass_nodes:
+        subclasses = [_extract_workflow_subclass(cn) for cn in subclass_nodes]
+
+        # Apply CLI profiling override to each subclass
+        if enable_profiling:
+            for sc in subclasses:
+                sc["enable_profiling"] = True
+
+        # For single-class files, promote the first subclass as the "primary"
+        primary = subclasses[0]
+
+        # First arg of the primary method (excluding 'self') becomes the entry-point
+        # variable initialized from state["input"] in the generated runtime.
+        primary_method_arg: Optional[str] = None
+        if primary["primary_method"] and primary["methods"].get(primary["primary_method"]):
+            args = primary["methods"][primary["primary_method"]]["args"]
+            primary_method_arg = args[0] if args else None
+
+        return {
+            "workflow_name": primary["workflow_name"],
+            "class_name": primary["class_name"],
+            "enable_profiling": primary["enable_profiling"],
+            "nodes": primary["nodes"],
+            "execution_logic": primary["execution_logic"],
+            "primary_method": primary["primary_method"],
+            "primary_method_arg": primary_method_arg,
+            "workflow_subclasses": subclasses,
+            "imports": visitor.imports,
+            "assignments": visitor.assignments,
+        }
+
+    # --- fallback: flat / main() pattern ---
     execution_body: List[ast.stmt] = tree.body
     for stmt in tree.body:
         if isinstance(stmt, ast.FunctionDef) and stmt.name == "main":
             execution_body = stmt.body
             break
 
-    execution_logic = visitor._extract_body(execution_body, capture_assignments=False)
-
-    # Override profiling if specified via CLI
-    if enable_profiling:
-        visitor.enable_profiling = True
+    known_node_vars = {nd["var_name"] for nd in visitor.nodes if nd.get("var_name")}
+    execution_logic = _extract_body(execution_body, known_node_vars, capture_assignments=False)
 
     return {
         "workflow_name": visitor.workflow_name,
+        "class_name": None,
         "enable_profiling": visitor.enable_profiling,
         "nodes": visitor.nodes,
         "execution_logic": execution_logic,
+        "primary_method": None,
+        "primary_method_arg": None,
+        "workflow_subclasses": [],
         "imports": visitor.imports,
         "assignments": visitor.assignments,
     }

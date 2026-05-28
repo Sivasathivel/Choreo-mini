@@ -171,9 +171,11 @@ def _resolve_input(state: AutoGenWorkflowState) -> Any:
 
 
 def _build_eval_env(state: AutoGenWorkflowState, extra: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    wf = _require_workflow(state)
     env: Dict[str, Any] = {
         "__builtins__": SAFE_BUILTINS,
-        "wf": _require_workflow(state),
+        "wf": wf,
+        "self": wf,
     }
     env.update(state.get("locals", {}))
     if extra:
@@ -183,6 +185,15 @@ def _build_eval_env(state: AutoGenWorkflowState, extra: Dict[str, Any] | None = 
 
 def _eval_expr(expr: str, state: AutoGenWorkflowState, extra: Dict[str, Any] | None = None) -> Any:
     return eval(expr, _build_eval_env(state, extra), {})
+
+
+def _bare_node_name(func_name: str) -> str:
+    """Strip leading 'self.' or 'wf.' qualifier so the result matches NODE_TYPES keys."""
+    base = func_name.rsplit(".", 1)[0]
+    for prefix in ("self.", "wf."):
+        if base.startswith(prefix):
+            return base[len(prefix):]
+    return base
 
 
 def _sync_locals_from_env(state: AutoGenWorkflowState, env: Dict[str, Any]) -> None:
@@ -313,7 +324,7 @@ def _execute_send(state: AutoGenWorkflowState, stmt: Dict[str, Any]) -> None:
         response_text = getattr(response, "content", str(assigned_value))
         message_agent = agent_name
     else:
-        base_name = func_name.rsplit(".", 1)[0]
+        base_name = _bare_node_name(func_name)
         runtime_name = str(NODE_RUNTIME_NAMES[base_name])
         agent_state = wf.agent_states[runtime_name]
         context_value = _eval_expr(call["args"][0], state) if call["args"] else _resolve_input(state)
@@ -339,7 +350,7 @@ def _execute_send(state: AutoGenWorkflowState, stmt: Dict[str, Any]) -> None:
 def _execute_service(state: AutoGenWorkflowState, stmt: Dict[str, Any]) -> None:
     wf = _require_workflow(state)
     call = stmt["call"]
-    base_name = call["func"].rsplit(".", 1)[0]
+    base_name = _bare_node_name(call["func"])
     runtime_name = str(NODE_RUNTIME_NAMES[base_name])
     service = wf.nodes[runtime_name]
     args = [_eval_expr(arg, state) for arg in call.get("args", [])]
@@ -358,6 +369,9 @@ def _run_dispatch(state: AutoGenWorkflowState) -> AutoGenWorkflowState:
     state.setdefault("frames", [])
 
     if not state["frames"] and not state.get("done"):
+        {% if primary_method_arg %}
+        state.setdefault("locals", {})["{{ primary_method_arg }}"] = _resolve_input(state)
+        {% endif %}
         _push_block(state, EXECUTION_LOGIC)
 
     while True:
@@ -389,7 +403,7 @@ def _run_dispatch(state: AutoGenWorkflowState) -> AutoGenWorkflowState:
                     _execute_send(state, stmt)
                     continue
                 if func_name.endswith(".execute"):
-                    base_name = func_name.rsplit(".", 1)[0]
+                    base_name = _bare_node_name(func_name)
                     node_type = NODE_TYPES.get(base_name)
                     if node_type == "AgentNode":
                         _execute_send(state, stmt)

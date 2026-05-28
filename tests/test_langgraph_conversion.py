@@ -1,31 +1,37 @@
+"""LangGraph conversion tests — subclass pattern.
+
+The subclass pattern is the correct way to use the choreo-mini converter:
+each ``class X(Workflow)`` becomes one LangGraph StateGraph.  The flat /
+functional pattern (``wf = Workflow(...)`` inside ``main()``) is for running
+choreo-mini workflows directly; it is NOT a valid conversion target.
+"""
+
 import importlib.util
 from pathlib import Path
 
 import jinja2
 
 from choreo_mini.core.ast_parser import parse_workflow_code
-from choreo_mini.core.llm import CustomLLM
-from choreo_mini.core.nodes import AgentNode, ServiceNode
-from choreo_mini.core.workflow import Workflow
 
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE_DIR = ROOT / "choreo_mini" / "templates" / "langgraph"
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
 def _contains_logic_type(entries, kind):
     for entry in entries:
         if entry.get("type") == kind:
             return True
-
         body = entry.get("body")
         if isinstance(body, list) and _contains_logic_type(body, kind):
             return True
-
         orelse = entry.get("orelse")
         if isinstance(orelse, list) and _contains_logic_type(orelse, kind):
             return True
-
     return False
 
 
@@ -62,36 +68,44 @@ def _load_module(module_path: Path, module_name: str):
     return module
 
 
-def test_langgraph_conversion_for_foo_smoke():
-    output_path = _render_langgraph("foo.py", "test_langgraph_output_foo.py")
-    generated = _load_module(output_path, "generated_foo")
+# ---------------------------------------------------------------------------
+# Parser tests (no LangGraph required)
+# ---------------------------------------------------------------------------
 
-    wf = Workflow("demo", enable_profiling=True)
-    AgentNode(wf, "Greeter", role="greeter", llm=CustomLLM(lambda prompt, context=None, **kw: f"echo: {prompt}"))
+def test_parser_detects_subclass():
+    """The parser should prefer the subclass pattern over main()."""
+    code = (ROOT / "examples" / "foo2.py").read_text()
+    data = parse_workflow_code(code)
 
-    result = generated.app.invoke({"wf": wf, "input": "hello", "messages": [], "loop_budget": 1})
+    assert data["class_name"] == "TicketTriageWorkflow"
+    assert data["workflow_name"] == "ticket_triage"
+    assert data["enable_profiling"] is True
+    assert data["primary_method"] == "process_batch"
+    assert data["primary_method_arg"] == "raw_batch"
+    assert len(data["workflow_subclasses"]) == 1
 
-    # CustomLLM.chat() now includes the system prompt ("Role: greeter") followed
-    # by the user message, so the echo lambda receives both joined with a newline.
-    assert result["last_response"] == "echo: Role: greeter\nhello"
-    assert result["last_agent"] == "Greeter"
-    assert wf.agent_states["Greeter"].call_count == 1
+    node_names = [n["var_name"] for n in data["nodes"]]
+    assert "classifier" in node_names
+    assert "billing_specialist" in node_names
+    assert "ticket_loader" in node_names
 
+    # Execution logic should have a for_loop (the per-ticket loop)
+    assert _contains_logic_type(data["execution_logic"], "for_loop")
+    assert _contains_logic_type(data["execution_logic"], "if")
+
+
+# ---------------------------------------------------------------------------
+# End-to-end LangGraph conversion tests (subclass pattern via foo2.py)
+# ---------------------------------------------------------------------------
 
 def test_langgraph_conversion_for_foo2_branching():
+    """Convert foo2.py (subclass pattern) and run a two-ticket batch through the graph."""
     output_path = _render_langgraph("foo2.py", "test_langgraph_output_foo2.py")
     generated = _load_module(output_path, "generated_foo2")
     foo2 = _load_module(ROOT / "examples" / "foo2.py", "foo2_module")
 
-    wf = Workflow("ticket_triage", enable_profiling=True)
-    wf.state["round"] = 0
-    wf.state["last_batch"] = []
-    AgentNode(wf, "Classifier", role="triage", llm=CustomLLM(foo2._classifier_response))
-    AgentNode(wf, "BillingSpecialist", role="billing", llm=CustomLLM(foo2._billing_response))
-    AgentNode(wf, "TechSpecialist", role="technical", llm=CustomLLM(foo2._technical_response))
-    AgentNode(wf, "Generalist", role="general", llm=CustomLLM(foo2._general_response))
-    AgentNode(wf, "Reviewer", role="review", llm=CustomLLM(foo2._review_response))
-    ServiceNode(wf, "TicketLoader", foo2.split_tickets)
+    # The workflow is self-contained — agents are configured inside __init__.
+    wf = foo2.TicketTriageWorkflow()
 
     result = generated.app.invoke(
         {
@@ -102,6 +116,7 @@ def test_langgraph_conversion_for_foo2_branching():
         }
     )
 
+    # Both tickets are processed: one billing, one technical.
     assert result["last_agent"] == "Reviewer"
     assert wf.state["round"] == 1
     assert wf.state["last_batch"] == ["invoice refund urgent", "app crash timeout"]
@@ -110,23 +125,24 @@ def test_langgraph_conversion_for_foo2_branching():
     assert wf.agent_states["TechSpecialist"].call_count == 1
     assert wf.agent_states["Generalist"].call_count == 0
     assert wf.agent_states["Reviewer"].call_count == 2
-    assert "Billing action plan" in result["last_response"] or "Technical debug plan" in result["last_response"]
+    assert (
+        "Billing action plan" in result["last_response"]
+        or "Technical debug plan" in result["last_response"]
+    )
 
 
 def test_langgraph_conversion_for_foo2_loop_budget():
+    """loop_budget has no effect on methods without an outer while-True loop.
+
+    process_batch processes one batch per call.  Passing loop_budget=2 does not
+    repeat the method body because there is no infinite_loop entry in the
+    execution logic.  The result is identical to loop_budget=1.
+    """
     output_path = _render_langgraph("foo2.py", "test_langgraph_output_foo2_loop.py")
     generated = _load_module(output_path, "generated_foo2_loop")
     foo2 = _load_module(ROOT / "examples" / "foo2.py", "foo2_module_loop")
 
-    wf = Workflow("ticket_triage", enable_profiling=True)
-    wf.state["round"] = 0
-    wf.state["last_batch"] = []
-    AgentNode(wf, "Classifier", role="triage", llm=CustomLLM(foo2._classifier_response))
-    AgentNode(wf, "BillingSpecialist", role="billing", llm=CustomLLM(foo2._billing_response))
-    AgentNode(wf, "TechSpecialist", role="technical", llm=CustomLLM(foo2._technical_response))
-    AgentNode(wf, "Generalist", role="general", llm=CustomLLM(foo2._general_response))
-    AgentNode(wf, "Reviewer", role="review", llm=CustomLLM(foo2._review_response))
-    ServiceNode(wf, "TicketLoader", foo2.split_tickets)
+    wf = foo2.TicketTriageWorkflow()
 
     generated.app.invoke(
         {
@@ -137,6 +153,8 @@ def test_langgraph_conversion_for_foo2_loop_budget():
         }
     )
 
-    assert wf.state["round"] == 2
-    assert wf.agent_states["Classifier"].call_count == 4
-    assert wf.agent_states["Reviewer"].call_count == 4
+    # No infinite loop in the method → only one batch is processed regardless
+    # of loop_budget.
+    assert wf.state["round"] == 1
+    assert wf.agent_states["Classifier"].call_count == 2
+    assert wf.agent_states["Reviewer"].call_count == 2

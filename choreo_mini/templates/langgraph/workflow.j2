@@ -135,9 +135,13 @@ def _resolve_input(state: WorkflowState) -> Any:
 
 
 def _build_eval_env(state: WorkflowState, extra: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    wf = _require_workflow(state)
     env: Dict[str, Any] = {
         "__builtins__": SAFE_BUILTINS,
-        "wf": _require_workflow(state),
+        "wf": wf,
+        # 'self' alias lets subclass-pattern expressions like self.send(...) / self.state[...]
+        # resolve correctly in the generated runtime without source transformation.
+        "self": wf,
     }
     env.update(state.get("locals", {}))
     if extra:
@@ -147,6 +151,25 @@ def _build_eval_env(state: WorkflowState, extra: Dict[str, Any] | None = None) -
 
 def _eval_expr(expr: str, state: WorkflowState, extra: Dict[str, Any] | None = None) -> Any:
     return eval(expr, _build_eval_env(state, extra), {})
+
+
+def _bare_node_name(func_name: str) -> str:
+    """Return the bare node variable name from a dotted func name.
+
+    Strips the leading object qualifier (e.g. 'self.' for subclass-pattern code
+    or 'wf.' for flat-pattern code) so that the result matches the keys in
+    NODE_TYPES and NODE_RUNTIME_NAMES.
+
+    Examples:
+        'self.ticket_loader.execute' -> 'ticket_loader'
+        'ticket_loader.execute'      -> 'ticket_loader'
+        'self.send'                  -> 'self'  (won't hit this path)
+    """
+    base = func_name.rsplit(".", 1)[0]
+    for prefix in ("self.", "wf."):
+        if base.startswith(prefix):
+            return base[len(prefix):]
+    return base
 
 
 def _sync_locals_from_env(state: WorkflowState, env: Dict[str, Any]) -> None:
@@ -273,6 +296,10 @@ def dispatch_node(state: WorkflowState) -> WorkflowState:
     state.setdefault("frames", [])
 
     if not state["frames"] and not state.get("done"):
+        {% if primary_method_arg %}
+        # Subclass pattern: bind the primary method's first argument from the input queue.
+        state.setdefault("locals", {})["{{ primary_method_arg }}"] = _resolve_input(state)
+        {% endif %}
         _push_block(state, EXECUTION_LOGIC)
 
     while True:
@@ -309,7 +336,7 @@ def dispatch_node(state: WorkflowState) -> WorkflowState:
 
                 if func_name.endswith(".execute"):
                     state["pending_call"] = stmt
-                    base_name = func_name.rsplit(".", 1)[0]
+                    base_name = _bare_node_name(func_name)
                     node_type = NODE_TYPES.get(base_name)
                     if node_type == "AgentNode":
                         state["pending_node"] = "send_call"
@@ -398,7 +425,7 @@ def send_call_node(state: WorkflowState) -> WorkflowState:
             response = wf.send(str(agent_name), str(user_input))
         message_agent = str(agent_name)
     else:
-        base_name = func_name.rsplit(".", 1)[0]
+        base_name = _bare_node_name(func_name)
         runtime_name = NODE_RUNTIME_NAMES[base_name]
         agent_state = wf.agent_states[str(runtime_name)]
         context_value = _eval_expr(call["args"][0], state) if call["args"] else _resolve_input(state)
@@ -426,7 +453,7 @@ def service_call_node(state: WorkflowState) -> WorkflowState:
     wf = _require_workflow(state)
     stmt = state.pop("pending_call")
     call = stmt["call"]
-    base_name = call["func"].rsplit(".", 1)[0]
+    base_name = _bare_node_name(call["func"])
     runtime_name = NODE_RUNTIME_NAMES[base_name]
     service = wf.nodes[str(runtime_name)]
 
