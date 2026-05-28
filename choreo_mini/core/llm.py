@@ -178,7 +178,19 @@ class LLM:
         context: Optional[List[Message]] = None,
         **kwargs: Any,
     ) -> str:
-        """Send a prompt (with optional prior-context messages) and return the response."""
+        """Send a prompt (with optional prior-context messages) and return the response.
+
+        Raises
+        ------
+        ValueError
+            If ``endpoint`` is ``None``.  Use :class:`CustomLLM` for callable-based
+            models that don't go through an HTTP endpoint.
+        """
+        if self.endpoint is None:
+            raise ValueError(
+                "LLM.generate() requires 'endpoint' to be set. "
+                "Use CustomLLM for callable-based models with no HTTP endpoint."
+            )
         messages = [{"role": m.role, "content": m.content} for m in (context or [])]
         messages.append({"role": "user", "content": prompt})
         return self._post(messages, **kwargs)
@@ -189,8 +201,62 @@ class LLM:
         context: Optional[List[Message]] = None,
         **kwargs: Any,
     ) -> Generator[str, None, None]:
-        """Yield the response as a single chunk (non-streaming fallback)."""
-        yield self.generate(prompt, context=context, **kwargs)
+        """Stream the response token-by-token using SSE (server-sent events).
+
+        Requires ``endpoint`` to be set.  Yields each text delta as it arrives.
+        Falls back to a single chunk when the server does not support streaming
+        or when ``endpoint`` is ``None``.
+        """
+        if self.endpoint is None:
+            yield self.generate(prompt, context=context, **kwargs)
+            return
+
+        messages = [{"role": m.role, "content": m.content} for m in (context or [])]
+        messages.append({"role": "user", "content": prompt})
+        payload: Dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True,
+            **kwargs,
+        }
+        hdrs: Dict[str, str] = {"Content-Type": "application/json"}
+        if self.api_key:
+            hdrs["Authorization"] = f"Bearer {self.api_key}"
+        hdrs.update(self._extra_headers)
+
+        with requests.post(
+            f"{self.endpoint}/v1/chat/completions",
+            json=payload,
+            headers=hdrs,
+            timeout=self.timeout,
+            stream=True,
+        ) as resp:
+            try:
+                resp.raise_for_status()
+            except requests.HTTPError:
+                try:
+                    detail = resp.json().get("error", {}).get("message") or resp.text
+                except Exception:
+                    detail = resp.text
+                raise requests.HTTPError(
+                    f"API error {resp.status_code}: {detail}", response=resp
+                )
+            for raw_line in resp.iter_lines():
+                if not raw_line:
+                    continue
+                line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+                if line.startswith("data: "):
+                    data_str = line[6:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        delta = chunk["choices"][0].get("delta", {})
+                        text = delta.get("content")
+                        if text:
+                            yield text
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        continue
 
     def chat(
         self,
@@ -265,7 +331,9 @@ class CustomLLM:
         tools: Optional[List[ToolSchema]] = None,
         **kwargs: Any,
     ) -> Message:
-        prompt = "\n".join(m.content for m in messages if m.role == "user")
+        # Include system and user messages so the agent's role/persona is preserved.
+        prompt_parts = [m.content for m in messages if m.role in ("system", "user") and m.content]
+        prompt = "\n".join(prompt_parts)
         return Message(role="assistant", content=self._fn(prompt, context=messages, **kwargs))
 
     async def chat_async(

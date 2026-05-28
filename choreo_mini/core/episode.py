@@ -172,6 +172,7 @@ class Episode:
 
         self.agents = agents
         self._env = env
+        self._initial_env = copy.deepcopy(env)   # preserved for reset()
         self.reward_fn = reward_fn
         self.env_update_fn = env_update_fn
         self.termination_fn = termination_fn
@@ -209,7 +210,7 @@ class Episode:
             )
 
         self.round += 1
-        env_snapshot = copy.deepcopy(self._env) if isinstance(self._env, dict) else self._env
+        env_snapshot = copy.deepcopy(self._env)
 
         # collect actions from all agents in registration order
         actions: Dict[str, str] = {}
@@ -260,6 +261,10 @@ class Episode:
         """
         if env is not None:
             self._env = env
+            self._initial_env = copy.deepcopy(env)
+        else:
+            # Restore to the state the episode was constructed with.
+            self._env = copy.deepcopy(self._initial_env)
         self.trajectory = []
         self.round = 0
         self.done = False

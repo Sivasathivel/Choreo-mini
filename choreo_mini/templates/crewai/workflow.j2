@@ -545,15 +545,11 @@ def kickoff(
     }
 
 
-crew = _build_crew([])
-
-
 if __name__ == "__main__":
     print(
         "Import this module and call kickoff(wf=workflow, inputs={'input': '...'}) "
         "with a configured choreo-mini Workflow instance."
     )
-
     {% if enable_profiling %}
     print("Profiling data is returned in the kickoff(...) result.")
     {% endif %}

@@ -131,7 +131,7 @@ class AgentNode(BaseNode):
     # ------------------------------------------------------------------
 
     def _build_system_prompt(self) -> str:
-        """Construct a system prompt from role/backstory/tasks."""
+        """Construct a system prompt from role/backstory/tasks/goals."""
         parts = []
         if self.role:
             parts.append(f"Role: {self.role}")
@@ -139,11 +139,13 @@ class AgentNode(BaseNode):
             parts.append(f"Backstory: {self.backstory}")
         if self.tasks:
             parts.append(f"Tasks: {', '.join(self.tasks)}")
+        if self.goals:
+            parts.append(f"Goals: {', '.join(self.goals)}")
         prompt = "\n".join(parts)
         if not prompt:
             raise ValueError(
                 f"Agent '{self.name}' has no system_prompt and not enough "
-                "information (role/backstory/tasks) to generate one."
+                "information (role/backstory/tasks/goals) to generate one."
             )
         return prompt
 

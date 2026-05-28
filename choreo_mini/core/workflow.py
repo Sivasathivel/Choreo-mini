@@ -156,7 +156,7 @@ class Workflow:
         self.beliefs: BeliefState = BeliefState()
 
         self.enable_profiling = enable_profiling
-        if self.enable_profiling:
+        if self.enable_profiling and not tracemalloc.is_tracing():
             tracemalloc.start()
 
     # ------------------------------------------------------------------
@@ -306,6 +306,21 @@ class Workflow:
         """Close all tool-client connections held by registered agents."""
         for agent_state in self.agent_states.values():
             await agent_state.agent.close()
+        if self.enable_profiling and tracemalloc.is_tracing():
+            tracemalloc.stop()
+
+    def close_sync(self) -> None:
+        """Synchronous convenience wrapper around :meth:`close`.
+
+        Use this when running a purely synchronous workflow that has no
+        surrounding event loop::
+
+            wf = MyWorkflow(llm=llm)
+            wf.run("task")
+            wf.close_sync()
+        """
+        import asyncio
+        asyncio.run(self.close())
 
     # ------------------------------------------------------------------
     # History & profiling
@@ -331,7 +346,8 @@ class Workflow:
         if agent_name:
             data = self.profile_data.get(agent_name)
             if data is None:
-                raise KeyError(f"No profile data for agent '{agent_name}'.")
+                # Profiling may be disabled or the agent hasn't been called yet.
+                return {agent_name: {"calls": 0, "total_latency": 0.0, "total_memory": 0.0}}
             return {agent_name: data}
         return dict(self.profile_data)
 

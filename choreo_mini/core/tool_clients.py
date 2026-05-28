@@ -229,10 +229,15 @@ class MCPStdioClient(BaseToolClient):
 
         parts = self.url.split()
         extra_env = self._credential_env()
+        # Merge credential vars into the full process environment so the
+        # subprocess inherits PATH, HOME, and all other inherited env vars.
+        # Replacing env entirely (the previous behaviour) caused subprocess
+        # launch failures because essential vars like PATH were wiped.
+        subprocess_env = {**__import__("os").environ, **extra_env} if extra_env else None
         server_params = StdioServerParameters(
             command=parts[0],
             args=parts[1:],
-            env=extra_env if extra_env else None,
+            env=subprocess_env,
         )
         transport = await self._exit_stack.enter_async_context(
             stdio_client(server_params)
@@ -369,7 +374,8 @@ class A2AClient(BaseToolClient):
                 "parts": [{"type": "text", "text": message_text}],
             },
         }
-        assert self._http is not None
+        if self._http is None:
+            raise RuntimeError(f"A2AClient '{self.name}' is not connected. Call connect() first.")
         response = await self._http.post("/tasks/send", json=payload)
         response.raise_for_status()
         data: Any = response.json()
@@ -447,7 +453,8 @@ class HTTPToolClient(BaseToolClient):
     async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
         if not self._connected:
             await self.connect()
-        assert self._http is not None
+        if self._http is None:
+            raise RuntimeError(f"HTTPToolClient '{self.name}' is not connected. Call connect() first.")
         response = await self._http.post(
             self.url,
             json={"tool_name": tool_name, "arguments": arguments},

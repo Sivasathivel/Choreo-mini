@@ -71,7 +71,9 @@ def test_langgraph_conversion_for_foo_smoke():
 
     result = generated.app.invoke({"wf": wf, "input": "hello", "messages": [], "loop_budget": 1})
 
-    assert result["last_response"] == "echo: hello"
+    # CustomLLM.chat() now includes the system prompt ("Role: greeter") followed
+    # by the user message, so the echo lambda receives both joined with a newline.
+    assert result["last_response"] == "echo: Role: greeter\nhello"
     assert result["last_agent"] == "Greeter"
     assert wf.agent_states["Greeter"].call_count == 1
 

@@ -19,6 +19,8 @@ class WorkflowVisitor(ast.NodeVisitor):
         self.imports: List[str] = []
         self.assignments: List[Dict[str, str]] = []  # preserve top-level assignments (e.g., wf, llm) for reconstruction
         self._scope_depth: int = 0
+        # Track class names that subclass Workflow (directly or transitively)
+        self._workflow_subclasses: set = {"Workflow"}
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
         self._scope_depth += 1
@@ -29,6 +31,19 @@ class WorkflowVisitor(ast.NodeVisitor):
         self._scope_depth += 1
         self.generic_visit(node)
         self._scope_depth -= 1
+
+    def visit_ClassDef(self, node: ast.ClassDef):
+        """Track classes that subclass Workflow (or any known Workflow subclass)."""
+        for base in node.bases:
+            base_name = ""
+            if isinstance(base, ast.Name):
+                base_name = base.id
+            elif isinstance(base, ast.Attribute):
+                base_name = self._get_full_name(base)
+            if base_name in self._workflow_subclasses:
+                self._workflow_subclasses.add(node.name)
+                break
+        self.generic_visit(node)
 
     def visit_Import(self, node: ast.Import):
         for alias in node.names:
@@ -46,9 +61,9 @@ class WorkflowVisitor(ast.NodeVisitor):
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             var_name = node.targets[0].id
 
-        # Look for Workflow instantiation
+        # Look for Workflow instantiation (direct or subclass)
         if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name):
-            if node.value.func.id == "Workflow" and var_name:
+            if node.value.func.id in self._workflow_subclasses and var_name:
                 kwargs = {kw.arg: kw.value for kw in node.value.keywords if kw.arg}
                 self.workflow_name = var_name
                 if "enable_profiling" in kwargs and isinstance(kwargs["enable_profiling"], ast.Constant):
@@ -370,7 +385,7 @@ def parse_workflow_code(code: str, enable_profiling: bool = False) -> Dict[str, 
             execution_body = stmt.body
             break
 
-    execution_logic = visitor._extract_body(execution_body)
+    execution_logic = visitor._extract_body(execution_body, capture_assignments=False)
 
     # Override profiling if specified via CLI
     if enable_profiling:
