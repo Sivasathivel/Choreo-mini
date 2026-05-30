@@ -17,11 +17,11 @@ Instead of forcing you to commit to a single framework, Choreo-Mini acts as an o
 
 | Feature | LangGraph | CrewAI | AutoGen | **Choreo-Mini** |
 |---------|-----------|--------|---------|-----------------|
-| Subclass-based workflow definition | ✗ | ✗ | ✗ | ✓ |
+| Write once, compile to any runtime | ✗ | ✗ | ✗ | ✓ |
 | Epistemic belief state per agent | ✗ | ✗ | ✗ | ✓ |
 | Built-in MARL episode loop | ✗ | ✗ | ✗ | ✓ |
 | Nash convergence detection | ✗ | ✗ | ✗ | ✓ |
-| Export to other frameworks | ✗ | ✗ | ✗ | ✓ |
+| MCP server exposure (zero config) | ✗ | ✗ | ✗ | ✓ |
 | Any OpenAI-compatible endpoint | ✓ | ✓ | ✓ | ✓ |
 
 ---
