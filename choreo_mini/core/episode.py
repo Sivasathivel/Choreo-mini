@@ -65,8 +65,19 @@ Quick-start example::
 from __future__ import annotations
 
 import copy
+import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
+
+from choreo_mini.core.observability import (
+    ObservabilityHook,
+    EpisodeStepStart,
+    EpisodeStepEnd,
+    new_trace_id,
+    new_span_id,
+    _safe_emit,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +175,7 @@ class Episode:
         env_update_fn: Optional[Callable[[Dict[str, Any], Dict[str, str], int], Any]] = None,
         termination_fn: Optional[Callable[["EpisodeStep", List["EpisodeStep"]], bool]] = None,
         max_rounds: int = 100,
+        observability: Optional[ObservabilityHook] = None,
     ) -> None:
         if not agents:
             raise ValueError("Episode requires at least one agent.")
@@ -181,6 +193,9 @@ class Episode:
         self.trajectory: List[EpisodeStep] = []
         self.round: int = 0
         self.done: bool = False
+
+        self._observability: Optional[ObservabilityHook] = observability
+        self.episode_id: str = new_trace_id()   # stable ID for this episode
 
     # ------------------------------------------------------------------
     # Public interface
@@ -211,6 +226,18 @@ class Episode:
 
         self.round += 1
         env_snapshot = copy.deepcopy(self._env)
+        step_span_id = new_span_id()
+
+        if self._observability:
+            _safe_emit(self._observability, EpisodeStepStart(
+                trace_id=self.episode_id,
+                span_id=step_span_id,
+                episode_id=self.episode_id,
+                round_number=self.round,
+                agent_names=list(self.agents),
+            ))
+
+        step_start = time.time()
 
         # collect actions from all agents in registration order
         actions: Dict[str, str] = {}
@@ -237,6 +264,18 @@ class Episode:
             self.done = True
         elif self.round >= self.max_rounds:
             self.done = True
+
+        if self._observability:
+            _safe_emit(self._observability, EpisodeStepEnd(
+                trace_id=self.episode_id,
+                span_id=step_span_id,
+                episode_id=self.episode_id,
+                round_number=self.round,
+                actions={k: str(v)[:120] for k, v in actions.items()},
+                rewards=rewards,
+                done=self.done,
+                latency_s=time.time() - step_start,
+            ))
 
         return episode_step
 

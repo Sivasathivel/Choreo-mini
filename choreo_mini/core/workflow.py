@@ -43,6 +43,15 @@ from typing import Any, Dict, List, Optional
 from choreo_mini.core.belief import Belief, BeliefState
 from choreo_mini.core.nodes import BaseNode, AgentNode, ServiceNode
 from choreo_mini.core.llm import Message
+from choreo_mini.core.observability import (
+    ObservabilityHook,
+    AgentCallStart,
+    AgentCallEnd,
+    AgentCallError,
+    new_trace_id,
+    new_span_id,
+    _safe_emit,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +153,12 @@ class Workflow:
                 return response.content
     """
 
-    def __init__(self, name: str, enable_profiling: bool = False) -> None:
+    def __init__(
+        self,
+        name: str,
+        enable_profiling: bool = False,
+        observability: Optional[ObservabilityHook] = None,
+    ) -> None:
         self.name = name
         self.nodes: Dict[str, BaseNode] = {}
         self.root: Optional[BaseNode] = None
@@ -158,6 +172,10 @@ class Workflow:
         self.enable_profiling = enable_profiling
         if self.enable_profiling and not tracemalloc.is_tracing():
             tracemalloc.start()
+
+        # Observability — stable trace ID for this workflow instance's lifetime
+        self._observability: Optional[ObservabilityHook] = observability
+        self.trace_id: str = new_trace_id()
 
     # ------------------------------------------------------------------
     # Node registration
@@ -208,7 +226,12 @@ class Workflow:
     # Messaging
     # ------------------------------------------------------------------
 
-    def send(self, agent_name: str, user_input: str) -> Message:
+    def send(
+        self,
+        agent_name: str,
+        user_input: str,
+        _parent_span_id: str = "",
+    ) -> Message:
         """Send a message to a named agent and return the reply.
 
         Conversation history is maintained automatically.
@@ -221,12 +244,40 @@ class Workflow:
             The user-turn text to send.
         """
         state = self._get_agent_state(agent_name)
+        span_id = new_span_id()
+
+        if self._observability:
+            _safe_emit(self._observability, AgentCallStart(
+                trace_id=self.trace_id,
+                span_id=span_id,
+                parent_span_id=_parent_span_id,
+                workflow_name=self.name,
+                agent_name=agent_name,
+                prompt_preview=user_input[:200],
+            ))
+
         state.history.append(Message(role="user", content=user_input))
         context = state.history.copy()
 
         snap_before = tracemalloc.take_snapshot() if self.enable_profiling else None
         start = time.time()
-        response = state.agent.execute(context=context)
+        try:
+            response = state.agent.execute(context=context)
+        except Exception as exc:
+            latency = time.time() - start
+            if self._observability:
+                _safe_emit(self._observability, AgentCallError(
+                    trace_id=self.trace_id,
+                    span_id=span_id,
+                    parent_span_id=_parent_span_id,
+                    workflow_name=self.name,
+                    agent_name=agent_name,
+                    latency_s=latency,
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                ))
+            raise
+
         latency = time.time() - start
 
         memory_used = 0.0
@@ -235,9 +286,30 @@ class Workflow:
             memory_used = sum(s.size_diff for s in snap_after.compare_to(snap_before, "lineno"))
 
         self._record(agent_name, state, response, latency, memory_used)
+
+        # Attach call_id so callers can correlate the response to its span.
+        response.call_id = span_id
+
+        if self._observability:
+            _safe_emit(self._observability, AgentCallEnd(
+                trace_id=self.trace_id,
+                span_id=span_id,
+                parent_span_id=_parent_span_id,
+                workflow_name=self.name,
+                agent_name=agent_name,
+                latency_s=latency,
+                memory_bytes=memory_used,
+                response_preview=(response.content or "")[:200],
+            ))
+
         return response
 
-    async def send_async(self, agent_name: str, user_input: str) -> Message:
+    async def send_async(
+        self,
+        agent_name: str,
+        user_input: str,
+        _parent_span_id: str = "",
+    ) -> Message:
         """Async variant of :meth:`send` with full tool-use loop support.
 
         Identical to :meth:`send` except that
@@ -245,12 +317,40 @@ class Workflow:
         which resolves tool calls when the agent has a ``toolset`` configured.
         """
         state = self._get_agent_state(agent_name)
+        span_id = new_span_id()
+
+        if self._observability:
+            _safe_emit(self._observability, AgentCallStart(
+                trace_id=self.trace_id,
+                span_id=span_id,
+                parent_span_id=_parent_span_id,
+                workflow_name=self.name,
+                agent_name=agent_name,
+                prompt_preview=user_input[:200],
+            ))
+
         state.history.append(Message(role="user", content=user_input))
         context = state.history.copy()
 
         snap_before = tracemalloc.take_snapshot() if self.enable_profiling else None
         start = time.time()
-        response = await state.agent.execute_async(context=context)
+        try:
+            response = await state.agent.execute_async(context=context)
+        except Exception as exc:
+            latency = time.time() - start
+            if self._observability:
+                _safe_emit(self._observability, AgentCallError(
+                    trace_id=self.trace_id,
+                    span_id=span_id,
+                    parent_span_id=_parent_span_id,
+                    workflow_name=self.name,
+                    agent_name=agent_name,
+                    latency_s=latency,
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                ))
+            raise
+
         latency = time.time() - start
 
         memory_used = 0.0
@@ -259,6 +359,21 @@ class Workflow:
             memory_used = sum(s.size_diff for s in snap_after.compare_to(snap_before, "lineno"))
 
         self._record(agent_name, state, response, latency, memory_used)
+
+        response.call_id = span_id
+
+        if self._observability:
+            _safe_emit(self._observability, AgentCallEnd(
+                trace_id=self.trace_id,
+                span_id=span_id,
+                parent_span_id=_parent_span_id,
+                workflow_name=self.name,
+                agent_name=agent_name,
+                latency_s=latency,
+                memory_bytes=memory_used,
+                response_preview=(response.content or "")[:200],
+            ))
+
         return response
 
     # ------------------------------------------------------------------

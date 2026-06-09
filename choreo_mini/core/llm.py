@@ -20,6 +20,16 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Union
 
 import requests
 
+# Observability is imported lazily-ish to avoid a circular import:
+# observability.py does not import llm.py, so this is safe.
+from choreo_mini.core.observability import (
+    ObservabilityHook,
+    LLMRequestStart,
+    LLMRequestEnd,
+    LLMRetry,
+    _safe_emit,
+)
+
 
 @dataclass
 class Message:
@@ -28,11 +38,15 @@ class Message:
     ``role`` is one of ``"system"``, ``"user"``, or ``"assistant"``.
     ``tool_call_id`` is populated on tool-result messages to correlate
     the result with the original tool-call request.
+    ``call_id`` is populated by :meth:`~choreo_mini.core.workflow.Workflow.send`
+    with the span ID of that call — correlates the response to its
+    observability span.
     """
 
     role: str
     content: Optional[str]
     tool_call_id: Optional[str] = None
+    call_id: Optional[str] = None
 
 
 @dataclass
@@ -88,6 +102,7 @@ class LLM:
         timeout: int = 60,
         max_retries: int = 2,
         retry_base_delay: float = 1.0,
+        observability: Optional[ObservabilityHook] = None,
         **kwargs: Any,
     ) -> None:
         self.api_key = api_key
@@ -105,6 +120,7 @@ class LLM:
         self.timeout = timeout
         self.max_retries = max(0, max_retries)
         self.retry_base_delay = max(0.0, retry_base_delay)
+        self._observability: Optional[ObservabilityHook] = observability
 
     def _serialize_tools(self, tools: List[ToolSchema]) -> List[Dict[str, Any]]:
         return [
@@ -164,6 +180,8 @@ class LLM:
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[ToolSchema]] = None,
+        _trace_id: str = "",
+        _span_id: str = "",
         **kwargs: Any,
     ) -> Union[str, ToolCallMessage]:
         """Format the payload and POST to the chat-completions endpoint.
@@ -172,10 +190,17 @@ class LLM:
         connection resets) with exponential back-off.  Raises on permanent
         errors (4xx other than 429) immediately.
 
+        ``_trace_id`` / ``_span_id`` are injected by the Workflow layer so
+        LLM-level observability events (retries, request timing) are correlated
+        to the same span as their parent ``wf.send()`` call.
+
         Returns a plain string for normal replies, or a :class:`ToolCallMessage`
         when the model's ``finish_reason`` is ``"tool_calls"``.
         """
-        payload: Dict[str, Any] = {"model": self.model, "messages": messages, **kwargs}
+        payload: Dict[str, Any] = {"model": self.model, "messages": messages}
+        # strip internal kwargs before forwarding to API
+        payload.update({k: v for k, v in kwargs.items()
+                        if not k.startswith("_")})
         if tools:
             payload["tools"] = self._serialize_tools(tools)
         hdrs: Dict[str, str] = {"Content-Type": "application/json"}
@@ -184,31 +209,60 @@ class LLM:
         hdrs.update(self._extra_headers)
 
         url = f"{self.endpoint}/v1/chat/completions"
+        model_name = self.model or ""
         last_exc: Exception = RuntimeError("No attempts made.")
 
         for attempt in range(self.max_retries + 1):
+            if self._observability:
+                _safe_emit(self._observability, LLMRequestStart(
+                    trace_id=_trace_id, span_id=_span_id,
+                    endpoint=url, model=model_name, attempt=attempt,
+                ))
+            req_start = time.time()
             try:
                 resp = requests.post(url, json=payload, headers=hdrs, timeout=self.timeout)
             except requests.ConnectionError as exc:
+                delay = self._retry_delay(attempt, None)
                 last_exc = RuntimeError(
                     f"Could not connect to LLM endpoint {url!r}. "
                     "Check hostname, network, VPN, or firewall settings."
                 )
                 if attempt < self.max_retries:
-                    time.sleep(self._retry_delay(attempt, None))
+                    if self._observability:
+                        _safe_emit(self._observability, LLMRetry(
+                            trace_id=_trace_id, span_id=_span_id,
+                            endpoint=url, model=model_name, attempt=attempt,
+                            delay_s=delay, reason="ConnectionError",
+                        ))
+                    time.sleep(delay)
                     continue
                 raise last_exc from exc
             except requests.Timeout as exc:
+                delay = self._retry_delay(attempt, None)
                 last_exc = RuntimeError(
                     f"LLM request timed out after {self.timeout}s "
                     f"(attempt {attempt + 1}/{self.max_retries + 1})."
                 )
                 if attempt < self.max_retries:
-                    time.sleep(self._retry_delay(attempt, None))
+                    if self._observability:
+                        _safe_emit(self._observability, LLMRetry(
+                            trace_id=_trace_id, span_id=_span_id,
+                            endpoint=url, model=model_name, attempt=attempt,
+                            delay_s=delay, reason="Timeout",
+                        ))
+                    time.sleep(delay)
                     continue
                 raise last_exc from exc
 
+            req_latency = time.time() - req_start
+
             if resp.ok:
+                if self._observability:
+                    _safe_emit(self._observability, LLMRequestEnd(
+                        trace_id=_trace_id, span_id=_span_id,
+                        endpoint=url, model=model_name, attempt=attempt,
+                        status_code=resp.status_code, latency_s=req_latency,
+                    ))
                 break
 
             detail = self._extract_error_detail(resp)
@@ -216,7 +270,15 @@ class LLM:
                 last_exc = requests.HTTPError(
                     f"API error {resp.status_code}: {detail}", response=resp
                 )
-                time.sleep(self._retry_delay(attempt, resp))
+                delay = self._retry_delay(attempt, resp)
+                if self._observability:
+                    _safe_emit(self._observability, LLMRetry(
+                        trace_id=_trace_id, span_id=_span_id,
+                        endpoint=url, model=model_name, attempt=attempt,
+                        status_code=resp.status_code, delay_s=delay,
+                        reason=detail[:120],
+                    ))
+                time.sleep(delay)
                 continue
 
             # Permanent error — raise immediately with full detail.
