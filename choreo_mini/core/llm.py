@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Generator, List, Optional, Union
 
@@ -85,6 +86,8 @@ class LLM:
         model: Optional[str] = None,
         headers: Optional[Dict[str, str]] = None,
         timeout: int = 60,
+        max_retries: int = 2,
+        retry_base_delay: float = 1.0,
         **kwargs: Any,
     ) -> None:
         self.api_key = api_key
@@ -100,6 +103,8 @@ class LLM:
         self.model = model
         self._extra_headers = headers or {}
         self.timeout = timeout
+        self.max_retries = max(0, max_retries)
+        self.retry_base_delay = max(0.0, retry_base_delay)
 
     def _serialize_tools(self, tools: List[ToolSchema]) -> List[Dict[str, Any]]:
         return [
@@ -114,6 +119,47 @@ class LLM:
             for t in tools
         ]
 
+    # ------------------------------------------------------------------
+    # Retry helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_error_detail(resp: requests.Response) -> str:
+        """Pull a human-readable message out of an API error response."""
+        try:
+            err_body = resp.json()
+            return (
+                err_body.get("error", {}).get("message")
+                or err_body.get("message")
+                or resp.text
+            )
+        except Exception:
+            return resp.text
+
+    @staticmethod
+    def _is_retryable(status_code: int) -> bool:
+        """Return True for transient server-side errors worth retrying."""
+        return status_code in (429, 500, 502, 503, 504)
+
+    def _retry_delay(self, attempt: int, resp: Optional[requests.Response]) -> float:
+        """Compute how long to wait before the next attempt.
+
+        Respects ``Retry-After`` when present (429); otherwise exponential
+        backoff capped at 60 s.
+        """
+        if resp is not None:
+            raw = resp.headers.get("retry-after") or resp.headers.get("Retry-After")
+            if raw is not None:
+                try:
+                    return max(float(raw), 0.0)
+                except ValueError:
+                    pass
+        return min(self.retry_base_delay * (2 ** attempt), 60.0)
+
+    # ------------------------------------------------------------------
+    # Core HTTP
+    # ------------------------------------------------------------------
+
     def _post(
         self,
         messages: List[Dict[str, Any]],
@@ -121,6 +167,10 @@ class LLM:
         **kwargs: Any,
     ) -> Union[str, ToolCallMessage]:
         """Format the payload and POST to the chat-completions endpoint.
+
+        Retries up to ``max_retries`` times on transient errors (429, 5xx,
+        connection resets) with exponential back-off.  Raises on permanent
+        errors (4xx other than 429) immediately.
 
         Returns a plain string for normal replies, or a :class:`ToolCallMessage`
         when the model's ``finish_reason`` is ``"tool_calls"``.
@@ -132,28 +182,51 @@ class LLM:
         if self.api_key:
             hdrs["Authorization"] = f"Bearer {self.api_key}"
         hdrs.update(self._extra_headers)
-        resp = requests.post(
-            f"{self.endpoint}/v1/chat/completions",
-            json=payload,
-            headers=hdrs,
-            timeout=self.timeout,
-        )
-        try:
-            resp.raise_for_status()
-        except requests.HTTPError:
-            # Surface the API error body so the caller gets a meaningful message
+
+        url = f"{self.endpoint}/v1/chat/completions"
+        last_exc: Exception = RuntimeError("No attempts made.")
+
+        for attempt in range(self.max_retries + 1):
             try:
-                err_body = resp.json()
-                detail = (
-                    err_body.get("error", {}).get("message")
-                    or err_body.get("message")
-                    or resp.text
+                resp = requests.post(url, json=payload, headers=hdrs, timeout=self.timeout)
+            except requests.ConnectionError as exc:
+                last_exc = RuntimeError(
+                    f"Could not connect to LLM endpoint {url!r}. "
+                    "Check hostname, network, VPN, or firewall settings."
                 )
-            except Exception:
-                detail = resp.text
+                if attempt < self.max_retries:
+                    time.sleep(self._retry_delay(attempt, None))
+                    continue
+                raise last_exc from exc
+            except requests.Timeout as exc:
+                last_exc = RuntimeError(
+                    f"LLM request timed out after {self.timeout}s "
+                    f"(attempt {attempt + 1}/{self.max_retries + 1})."
+                )
+                if attempt < self.max_retries:
+                    time.sleep(self._retry_delay(attempt, None))
+                    continue
+                raise last_exc from exc
+
+            if resp.ok:
+                break
+
+            detail = self._extract_error_detail(resp)
+            if self._is_retryable(resp.status_code) and attempt < self.max_retries:
+                last_exc = requests.HTTPError(
+                    f"API error {resp.status_code}: {detail}", response=resp
+                )
+                time.sleep(self._retry_delay(attempt, resp))
+                continue
+
+            # Permanent error — raise immediately with full detail.
             raise requests.HTTPError(
                 f"API error {resp.status_code}: {detail}", response=resp
             )
+        else:
+            # Exhausted all retries on a retryable error.
+            raise last_exc
+
         choice = resp.json()["choices"][0]
         msg = choice["message"]
         if choice.get("finish_reason") == "tool_calls":
@@ -224,23 +297,36 @@ class LLM:
             hdrs["Authorization"] = f"Bearer {self.api_key}"
         hdrs.update(self._extra_headers)
 
-        with requests.post(
-            f"{self.endpoint}/v1/chat/completions",
-            json=payload,
-            headers=hdrs,
-            timeout=self.timeout,
-            stream=True,
-        ) as resp:
+        url = f"{self.endpoint}/v1/chat/completions"
+        last_exc: Exception = RuntimeError("No attempts made.")
+        resp = None
+        for attempt in range(self.max_retries + 1):
             try:
-                resp.raise_for_status()
-            except requests.HTTPError:
-                try:
-                    detail = resp.json().get("error", {}).get("message") or resp.text
-                except Exception:
-                    detail = resp.text
-                raise requests.HTTPError(
+                resp = requests.post(
+                    url, json=payload, headers=hdrs, timeout=self.timeout, stream=True
+                )
+            except (requests.ConnectionError, requests.Timeout) as exc:
+                last_exc = exc
+                if attempt < self.max_retries:
+                    time.sleep(self._retry_delay(attempt, None))
+                    continue
+                raise
+            if resp.ok:
+                break
+            detail = self._extract_error_detail(resp)
+            if self._is_retryable(resp.status_code) and attempt < self.max_retries:
+                last_exc = requests.HTTPError(
                     f"API error {resp.status_code}: {detail}", response=resp
                 )
+                time.sleep(self._retry_delay(attempt, resp))
+                continue
+            raise requests.HTTPError(
+                f"API error {resp.status_code}: {detail}", response=resp
+            )
+        else:
+            raise last_exc
+
+        with resp:
             for raw_line in resp.iter_lines():
                 if not raw_line:
                     continue

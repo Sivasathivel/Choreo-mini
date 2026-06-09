@@ -105,11 +105,9 @@ def test_langgraph_toolset_rendered():
 
 
 def test_langgraph_no_toolset_no_async_send():
-    rendered, _ = _render_backend("foo.py", "langgraph")
-    # AGENT_TOOLSETS dict should exist but be empty
+    # foo2.py has no toolsets — AGENT_TOOLSETS is present but empty at runtime
+    rendered, _ = _render_backend("foo2.py", "langgraph")
     assert "AGENT_TOOLSETS" in rendered
-    # Without toolsets, the async send branch should still appear in template
-    # but AGENT_TOOLSETS being empty means branch won't trigger at runtime
     ast.parse(rendered)
 
 
