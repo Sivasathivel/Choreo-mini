@@ -411,8 +411,9 @@ class CustomerOpsWorkflow(Workflow):
         self,
         client_config: Optional[RemoteLLMConfig] = None,
         demo_mode: bool = False,
+        observability=None,
     ):
-        super().__init__("customer_ops_control_tower", enable_profiling=True)
+        super().__init__("customer_ops_control_tower", enable_profiling=True, observability=observability)
 
         self.state["batch_number"] = 0
         self.state["last_batch"] = []
