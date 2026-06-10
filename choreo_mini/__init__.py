@@ -6,6 +6,15 @@ from choreo_mini.core.nodes import AgentNode, ServiceNode
 from choreo_mini.core.llm import LLM, CustomLLM, Message, ToolSchema, ToolCallRequest, ToolCallMessage
 from choreo_mini.core.episode import Episode, EpisodeStep, nash_convergence_detector, max_rounds_terminator
 from choreo_mini.core.mcp_server import WorkflowMCPServer
+from choreo_mini.core.exceptions import (
+    ChoreoError,
+    WorkflowError,
+    AgentNotFoundError,
+    AgentRegistrationError,
+    EpisodeError,
+    LLMError,
+    ConversionError,
+)
 from choreo_mini.core.observability import (
     ObservabilityHook,
     ObservabilityEvent,
@@ -50,6 +59,14 @@ __all__ = [
     "max_rounds_terminator",
     # MCP server
     "WorkflowMCPServer",
+    # Exceptions
+    "ChoreoError",
+    "WorkflowError",
+    "AgentNotFoundError",
+    "AgentRegistrationError",
+    "EpisodeError",
+    "LLMError",
+    "ConversionError",
     # Observability
     "ObservabilityHook",
     "ObservabilityEvent",

@@ -43,6 +43,7 @@ from typing import Any, Dict, List, Optional
 from choreo_mini.core.belief import Belief, BeliefState
 from choreo_mini.core.nodes import BaseNode, AgentNode, ServiceNode
 from choreo_mini.core.llm import Message
+from choreo_mini.core.exceptions import AgentNotFoundError, AgentRegistrationError
 from choreo_mini.core.observability import (
     ObservabilityHook,
     AgentCallStart,
@@ -217,9 +218,14 @@ class Workflow:
         Called automatically when an ``AgentNode`` is constructed with this
         workflow.  Each agent receives its own :class:`AgentState` (including
         an independent :class:`~choreo_mini.core.belief.BeliefState`).
+
+        Raises
+        ------
+        AgentRegistrationError
+            If an agent with the same name is already registered.
         """
         if agent.name in self.agent_states:
-            raise ValueError(f"Agent '{agent.name}' is already registered in workflow '{self.name}'.")
+            raise AgentRegistrationError(agent.name, self.name)
         self.agent_states[agent.name] = AgentState(agent)
 
     # ------------------------------------------------------------------
@@ -449,6 +455,46 @@ class Workflow:
         """Clear the conversation history for the named agent."""
         self._get_agent_state(agent_name).clear_history()
 
+    def dump(self) -> Dict[str, Any]:
+        """Return a complete state snapshot for debugging, logging, or checkpointing.
+
+        The returned dict is JSON-serialisable (all values are plain Python
+        primitives) and captures everything needed to understand the current
+        state of a running or completed workflow::
+
+            import json
+            print(json.dumps(wf.dump(), indent=2))
+
+        Returns
+        -------
+        dict with keys:
+
+        * ``workflow_name`` — workflow identifier.
+        * ``trace_id`` — observability trace ID for this instance.
+        * ``state`` — current ``wf.state`` key/value store.
+        * ``beliefs`` — workflow-level belief snapshot (confidence-weighted).
+        * ``agents`` — per-agent call counts, latency, history length, beliefs.
+        * ``profiling`` — per-agent profiling counters, or ``None`` when
+          ``enable_profiling=False``.
+        """
+        agents_snapshot: Dict[str, Any] = {}
+        for name, s in self.agent_states.items():
+            agents_snapshot[name] = {
+                "call_count": s.call_count,
+                "total_latency_s": round(s.total_latency, 6),
+                "total_memory_bytes": s.total_memory,
+                "history_length": len(s.history),
+                "beliefs": s.belief.snapshot(),
+            }
+        return {
+            "workflow_name": self.name,
+            "trace_id": self.trace_id,
+            "state": dict(self.state),
+            "beliefs": self.beliefs.snapshot(),
+            "agents": agents_snapshot,
+            "profiling": dict(self.profile_data) if self.enable_profiling else None,
+        }
+
     def get_profile(self, agent_name: Optional[str] = None) -> Dict[str, Dict[str, float]]:
         """Return profiling data collected since ``enable_profiling=True``.
 
@@ -473,9 +519,10 @@ class Workflow:
     def _get_agent_state(self, agent_name: str) -> AgentState:
         state = self.agent_states.get(agent_name)
         if state is None:
-            raise KeyError(
-                f"Agent '{agent_name}' is not registered in workflow '{self.name}'. "
-                f"Registered agents: {list(self.agent_states)}"
+            raise AgentNotFoundError(
+                agent_name=agent_name,
+                workflow_name=self.name,
+                registered_agents=list(self.agent_states),
             )
         return state
 

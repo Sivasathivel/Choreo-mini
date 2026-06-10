@@ -117,7 +117,7 @@ class TestEpisodeStep_:
         ep = _make_episode(max_rounds=1)
         ep.step()
         assert ep.done
-        with pytest.raises(RuntimeError, match="already done"):
+        with pytest.raises(Exception, match="already done"):
             ep.step()
 
     def test_env_snapshot_is_copy(self):

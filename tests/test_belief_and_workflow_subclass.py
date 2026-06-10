@@ -1,5 +1,7 @@
 """Tests for epistemic belief state and the Workflow subclass pattern."""
 
+import pytest
+
 from choreo_mini.core.belief import Belief, BeliefState
 from choreo_mini.core.workflow import Workflow, AgentState
 from choreo_mini.core.nodes import AgentNode
@@ -179,9 +181,8 @@ class TestWorkflowSubclass:
         assert isinstance(state.belief, BeliefState)
 
     def test_unknown_agent_raises(self):
+        from choreo_mini.core.exceptions import AgentNotFoundError
         wf = SimpleWorkflow()
-        try:
+        with pytest.raises(AgentNotFoundError) as exc_info:
             wf.send("NonExistent", "hello")
-            assert False, "expected KeyError"
-        except KeyError as e:
-            assert "NonExistent" in str(e)
+        assert "NonExistent" in str(exc_info.value)

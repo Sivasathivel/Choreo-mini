@@ -188,7 +188,18 @@ def _build_eval_env(state: CrewWorkflowState, extra: Dict[str, Any] | None = Non
 
 
 def _eval_expr(expr: str, state: CrewWorkflowState, extra: Dict[str, Any] | None = None) -> Any:
-    return eval(expr, _build_eval_env(state, extra), {})
+    env = _build_eval_env(state, extra)
+    try:
+        return eval(expr, env, {})
+    except Exception as exc:
+        available = sorted(k for k in env if not k.startswith("_"))
+        raise RuntimeError(
+            f"[choreo-mini] eval failed on expression {expr!r}\n"
+            f"  Error      : {type(exc).__name__}: {exc}\n"
+            f"  In scope   : {available}\n"
+            f"  Hint: if a variable is missing, check that the AST parser captured\n"
+            f"  its assignment and that all upstream steps ran without errors."
+        ) from exc
 
 
 def _bare_node_name(func_name: str) -> str:

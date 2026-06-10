@@ -70,6 +70,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from choreo_mini.core.exceptions import EpisodeError
 from choreo_mini.core.observability import (
     ObservabilityHook,
     EpisodeStepStart,
@@ -215,13 +216,15 @@ class Episode:
             If the episode is already done.
         """
         if self.done:
-            raise RuntimeError(
-                "Episode is already done. Call reset() to start a new episode."
+            raise EpisodeError(
+                "Episode is already done. Call reset() to start a new episode.",
+                episode_id=self.episode_id,
             )
         if self.round >= self.max_rounds:
             self.done = True
-            raise RuntimeError(
-                f"Episode reached max_rounds ({self.max_rounds}) without terminating."
+            raise EpisodeError(
+                f"Episode reached max_rounds ({self.max_rounds}) without terminating.",
+                episode_id=self.episode_id,
             )
 
         self.round += 1
