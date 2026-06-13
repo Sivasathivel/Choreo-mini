@@ -161,6 +161,32 @@ class LLMRetry(ObservabilityEvent):
     reason: str = ""
 
 
+# -- LLM pool events ---------------------------------------------------------
+
+@dataclass
+class LLMPoolRoute(ObservabilityEvent):
+    """Emitted when an LLMPool selects a candidate to handle a call."""
+
+    event_type: str = "llm_pool_route"
+    pool_name: str = ""
+    candidate_name: str = ""
+    policy: str = ""
+    candidate_index: int = 0        # position in the sorted/rotated order
+    cost_per_1k_tokens: float = 0.0
+
+
+@dataclass
+class LLMPoolFallback(ObservabilityEvent):
+    """Emitted when an LLMPool falls back from a failed candidate to the next."""
+
+    event_type: str = "llm_pool_fallback"
+    pool_name: str = ""
+    failed_candidate: str = ""
+    next_candidate: str = ""
+    error_type: str = ""
+    error_message: str = ""
+
+
 # -- Episode events ----------------------------------------------------------
 
 @dataclass
@@ -341,6 +367,26 @@ class StdoutHook:
                 + f"  {event.model}"
                 + f"  status={event.status_code}"
                 + f"  latency={event.latency_s:.3f}s"
+            )
+
+        elif isinstance(event, LLMPoolRoute):
+            line = (
+                f"{prefix} "
+                + _c("⇢ pool", _CYAN, color=self.color)
+                + f"  {_c(event.pool_name, _BOLD, color=self.color)}"
+                + f"  → {_c(event.candidate_name, _GREEN, color=self.color)}"
+                + f"  policy={event.policy}"
+                + (f"  cost=${event.cost_per_1k_tokens:.4f}/1k" if event.cost_per_1k_tokens else "")
+            )
+
+        elif isinstance(event, LLMPoolFallback):
+            line = (
+                f"{prefix} "
+                + _c("⇢ fallback", _YELLOW + _BOLD, color=self.color)
+                + f"  {event.pool_name}"
+                + f"  {_c(event.failed_candidate, _RED, color=self.color)}"
+                + f" → {_c(event.next_candidate, _GREEN, color=self.color)}"
+                + f"  {event.error_type}: {event.error_message[:60]}"
             )
 
         elif isinstance(event, EpisodeStepStart):

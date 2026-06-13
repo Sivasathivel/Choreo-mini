@@ -5,6 +5,7 @@ from choreo_mini.core.workflow import Workflow, AgentState
 from choreo_mini.core.nodes import AgentNode, ServiceNode
 from choreo_mini.core.llm import LLM, CustomLLM, Message, ToolSchema, ToolCallRequest, ToolCallMessage
 from choreo_mini.core.episode import Episode, EpisodeStep, nash_convergence_detector, max_rounds_terminator
+from choreo_mini.core.pool import LLMCandidate, LLMPool
 from choreo_mini.core.mcp_server import WorkflowMCPServer
 from choreo_mini.core.exceptions import (
     ChoreoError,
@@ -26,6 +27,8 @@ from choreo_mini.core.observability import (
     LLMRetry,
     EpisodeStepStart,
     EpisodeStepEnd,
+    LLMPoolRoute,
+    LLMPoolFallback,
     StdoutHook,
     JsonFileHook,
     OTLPHook,
@@ -57,6 +60,9 @@ __all__ = [
     "EpisodeStep",
     "nash_convergence_detector",
     "max_rounds_terminator",
+    # LLM pool
+    "LLMCandidate",
+    "LLMPool",
     # MCP server
     "WorkflowMCPServer",
     # Exceptions
@@ -78,6 +84,8 @@ __all__ = [
     "LLMRetry",
     "EpisodeStepStart",
     "EpisodeStepEnd",
+    "LLMPoolRoute",
+    "LLMPoolFallback",
     "StdoutHook",
     "JsonFileHook",
     "OTLPHook",
