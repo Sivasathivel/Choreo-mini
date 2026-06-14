@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "choreo-mini"
 version = "0.3.0"
-description = "A lightweight Python meta-framework for building, experimenting with, and orchestrating LLM-based agents across multiple runtimes."
+description = "Lightweight Python framework for multi-agent LLM workflows — MARL episode loop, LLM pool scheduling, OTEL observability, and compile-to-any-runtime."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "LicenseRef-Choreo-Mini-1.2"
@@ -22,8 +22,16 @@ classifiers = [
     "Operating System :: OS Independent",
     "Intended Audience :: Developers",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: System :: Distributed Computing",
 ]
-keywords = ["llm", "agents", "orchestration", "langgraph", "crewai", "autogen", "ai", "workflow", "agentic"]
+keywords = [
+    "llm", "agents", "agent-framework", "orchestration", "multi-agent",
+    "marl", "multi-agent-reinforcement-learning", "llm-pool", "llm-routing",
+    "observability", "opentelemetry", "otel", "tracing",
+    "langgraph", "crewai", "autogen", "workflow", "agentic",
+    "negotiation", "trade", "episode",
+]
 dependencies = [
     "jinja2>=3.0.0",
     "requests>=2.28.0",
