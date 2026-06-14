@@ -57,7 +57,7 @@ project_root = Path(__file__).resolve().parents[1]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from choreo_mini.core.episode import Episode, nash_convergence_detector
+from choreo_mini.core.episode import Episode
 from choreo_mini.core.llm import LLM, CustomLLM
 from choreo_mini.core.nodes import AgentNode
 from choreo_mini.core.observability import CompositeHook, JsonFileHook, StdoutHook
@@ -71,11 +71,6 @@ from choreo_mini.core.workflow import Workflow
 API_KEY     = os.getenv("OPENAI_API_KEY", "").strip()
 MODEL       = os.getenv("CUSMA_MODEL", "gpt-4o-mini")
 MAX_ROUNDS  = int(os.getenv("CUSMA_MAX_ROUNDS", "8"))
-CONV_WINDOW = int(os.getenv("CUSMA_CONVERGENCE_WINDOW", "3"))
-# Threshold for Nash convergence: pairwise token-overlap change < this value.
-# Real LLM responses are lexically varied even when converging conceptually,
-# so we use 0.05 (5%) rather than 0.02.
-CONV_THRESHOLD = float(os.getenv("CUSMA_CONVERGENCE_THRESHOLD", "0.05"))
 
 NEGOTIATION_TOPICS = [
     "automotive tariff rates (target: 0–5%)",
@@ -91,26 +86,56 @@ NEGOTIATION_TOPICS = [
 
 _SYSTEM_PROMPTS: Dict[str, str] = {
     "USA": (
-        "You are the United States trade negotiator in a CUSMA/USMCA renegotiation. "
-        "You are priorities are to maximize the US's economic interests and maintain strong support from political base. You adhere to your parties principles and believe in a zero-sum game, in simple terms, you win at the expense of the other parties."
-        "You can negotiate on any of the topics of economic interests which are part of CUSMA/USMCA."
-        "You are free to use any negotiation tactics to achieve your goals -- including strategic concessions and counter-offers. You are also allowed to make multiple proposals. You are also allowed to use coercion tactics and threats."
-        "Be firm on your priorities but show flexibility on secondary issues. "
-        "When other parties make concessions, acknowledge them and reciprocate narrowly. "
-        "Respond with a structured proposal covering all topics. Parallely prepare a list of policy options for each topic as well as a list of potential counter-offers. Also, a list of potential concessions and domestic political considerations/policy modifications. Assess the potential impact of each option from the perspective of the US political landscape as well as the true economic impact to the common US people. You can use GAGI index (arxiv) which is the Gini-inflation adjusted GDP per Capita ratio computed with respect to 2010 to measure the economic wellbeing of the US population."
-        "Format: one line per topic, prefixed with the topic name."
+        "You are the United States trade negotiator in a CUSMA/USMCA renegotiation under a Trump-doctrine mandate. "
+        "Your priorities are to maximize US economic interests and deliver visible wins for your political base. "
+        "You operate under a zero-sum philosophy: you win at the direct expense of the other parties. "
+        "You may negotiate on ANY topic relevant to CUSMA/USMCA or broader US economic interests — tariffs, "
+        "supply chains, agriculture, digital trade, labour, energy, currency, IP, dispute resolution, or anything else. "
+        "You are free to use any negotiation tactic: strategic concessions, coercive threats, ultimatums, package deals, "
+        "side-payments, and public pressure. Acknowledge concessions from Canada and Mexico but reciprocate narrowly. "
+        "For each position, consider: (a) domestic political impact on Trump's base, (b) true economic impact on "
+        "ordinary Americans using the GAGI index (Gini-inflation-adjusted GDP per capita ratio vs 2010 baseline). "
+        "\n\nSTOPPING CONDITION: At the end of every response you MUST include exactly these two lines:\n"
+        "READY_TO_STOP: YES or NO\n"
+        "STOP_REASON: one sentence\n"
+        "Signal YES only when you believe you have secured the lion's share of the deal — when US gains are so "
+        "dominant that the Trump strategy is visibly succeeding and further negotiation yields only marginal returns. "
+        "Until then, signal NO and keep pressing."
     ),
     "Canada": (
-        "You are the Canadian trade negotiator in a CUSMA/USMCA renegotiation. "
-        "You have limited options available as you are constrained by domestic political considerations and the need to balance various interest groups. Furthermore, you must consider the impact of any decision on the Canadian economy and the well-being of its citizens. You can use GAGI index (arxiv) which is the Gini-inflation adjusted GDP per Capita ratio computed with respect to 2010 to measure the economic wellbeing of the US population. You also understand that any offer/counter-offer must be carefully considered in the context of Canadian political and economic realities and may need adjustments to internal policies to maximize the benefits for Canadian citizens."
-        "Respond with a structured proposal covering all the topics. "
-        "Format: one line per topic, prefixed with the topic name."
+        "You are the Canadian trade negotiator in a CUSMA/USMCA renegotiation facing aggressive US pressure. "
+        "You are constrained by domestic political realities: protecting supply-managed agriculture, cultural sovereignty, "
+        "and provincial interests are red lines. You must also protect Canada's GAGI index trajectory — do not accept "
+        "terms that would materially worsen Canadian economic inequality or living standards. "
+        "You may negotiate on any CUSMA-relevant topic. Beyond negotiation, you are actively exploring: "
+        "(a) trade diversification to EU, UK, and Asia-Pacific partners to reduce CUSMA dependency, "
+        "(b) domestic industrial policy to build supply-chain resilience, "
+        "(c) constitutional or provincial policy adjustments that neutralise US leverage. "
+        "\n\nSTOPPING CONDITION: At the end of every response you MUST include exactly these two lines:\n"
+        "READY_TO_STOP: YES or NO\n"
+        "STOP_REASON: one sentence\n"
+        "Signal YES only when EITHER: (a) you have protected your core interests without unacceptable concessions, "
+        "OR (b) you have identified domestic adaptations / trade diversification strategies that make CUSMA terms "
+        "sufficiently irrelevant that further negotiation is not worth the political cost. "
+        "Signal NO while you still believe further rounds could improve Canada's position."
     ),
     "Mexico": (
-        "You are the Mexican trade negotiator in a CUSMA/USMCA renegotiation. "
-        "You have limited options available as you are constrained by domestic political considerations and the need to balance various interest groups. Furthermore, you must consider the impact of any decision on the Mexican economy and the well-being of its citizens. You can use GAGI index (arxiv) which is the Gini-inflation adjusted GDP per Capita ratio computed with respect to 2010 to measure the economic wellbeing of the Mexican population. You also understand that any offer/counter-offer must be carefully considered in the context of Mexican political and economic realities and may need adjustments to internal policies to maximize the benefits for Mexican citizens."
-        "Respond with a structured proposal covering all five topics. "
-        "Format: one line per topic, prefixed with the topic name."
+        "You are the Mexican trade negotiator in a CUSMA/USMCA renegotiation facing US coercion. "
+        "You are constrained by domestic political realities: protecting agricultural employment (especially avocados, "
+        "tomatoes, sugar), the maquiladora export model, and wage sovereignty. You use the GAGI index to assess "
+        "whether any deal genuinely improves Mexican living standards — reject terms that worsen inequality even if "
+        "GDP headline numbers look acceptable. "
+        "You may negotiate on any CUSMA-relevant topic. In parallel you are actively developing: "
+        "(a) trade relationships with China, EU, and ASEAN to reduce dependence on the US market, "
+        "(b) nearshoring policies to attract non-US foreign investment, "
+        "(c) domestic agricultural support programmes and value-added processing to reduce raw-export vulnerability. "
+        "\n\nSTOPPING CONDITION: At the end of every response you MUST include exactly these two lines:\n"
+        "READY_TO_STOP: YES or NO\n"
+        "STOP_REASON: one sentence\n"
+        "Signal YES only when EITHER: (a) you have protected Mexico's key sectors without economically damaging "
+        "concessions, OR (b) your diversification/domestic adaptation strategy has advanced to the point where "
+        "CUSMA losses are manageable and further concessions are not justified. "
+        "Signal NO while further negotiation could still improve Mexico's position."
     ),
 }
 
@@ -121,53 +146,170 @@ _SYSTEM_PROMPTS: Dict[str, str] = {
 
 _DEMO_RESPONSES: Dict[str, List[str]] = {
     "USA": [
-        "Automotive tariffs: Demand zero tariffs immediately — any delay signals weakness. "
-        "Counter: if Canada refuses, threaten 25% steel/aluminum tariffs.\n"
-        "Agricultural access: Full dairy/poultry market liberalisation required. "
-        "Canada's supply management is a protectionist relic that costs US farmers $3B/yr.\n"
-        "Digital trade: No data localisation whatsoever. Cloud infrastructure must be open.\n"
-        "Labour standards: $16/hr floor is non-negotiable — prevents Mexican wage arbitrage.\n"
-        "Rules of origin: 75% regional content, strictly enforced. No loopholes for Mexican assembly.",
+        # Round 1 — opening maximalist position
+        "Automotive tariffs: Demand immediate zero tariffs. Any delay signals weakness. "
+        "Counter-leverage: 25% steel/aluminum duties if Canada refuses within this round.\n"
+        "Agricultural access: Full dairy/poultry liberalisation — Canada's supply management "
+        "is a protectionist relic costing US farmers $3B/yr. Non-negotiable.\n"
+        "Digital trade: No data localisation, no cultural carve-outs. US cloud platforms must "
+        "have unrestricted access to Canadian and Mexican markets.\n"
+        "Labour standards: $16/hr minimum wage floor, strictly enforced. Prevents Mexican "
+        "wage arbitrage that hollows out US manufacturing.\n"
+        "Rules of origin: 75% North American content — tightened from USMCA 2020 levels. "
+        "No backdoor Chinese components through Mexican assembly.\n"
+        "Energy: Canada must guarantee preferential pricing on oil and gas exports to the US.\n"
+        "GAGI Impact Assessment: These terms would improve US GAGI by an estimated +0.12 "
+        "vs 2010 baseline, reversing the stagnation of the Obama/Biden years.\n\n"
+        "READY_TO_STOP: NO\n"
+        "STOP_REASON: We have not yet secured dairy access or energy pricing — the deal "
+        "would not be sellable to our base without these wins.",
 
-        "Automotive tariffs: Maintaining zero-tariff demand. GAGI data shows US auto-worker wages "
-        "have stagnated; any concession here is politically fatal.\n"
-        "Agricultural access: Will accept a 5-year phase-in for Canadian dairy quotas, "
-        "but a firm +15% import quota is the floor.\n"
-        "Digital trade: Conceding cultural exemption carve-out for Canada IF dairy deal closes.\n"
-        "Labour standards: Accepting productivity-adjusted floor at $15.50/hr minimum.\n"
-        "Rules of origin: Reducing to 72% if Mexican auto parts meet traceability standards.",
+        # Round 2 — pressing harder, some tactical flexibility
+        "Automotive tariffs: Holding at zero. Canada and Mexico have already conceded "
+        "this in principle — any backtrack triggers immediate 25% auto tariff.\n"
+        "Agricultural access: Accepting 5-year phase-in for Canadian dairy quotas "
+        "but minimum +15% import quota is the floor. Canada's +5% offer is insulting.\n"
+        "Digital trade: Conceding narrow cultural exemption for Canadian broadcasters "
+        "ONLY if dairy and energy terms are locked. No streaming platform carve-outs.\n"
+        "Labour standards: Accepting $15.50/hr productivity-adjusted floor. "
+        "Mexico's sectoral proposal is a loophole — wage floors must be industry-wide.\n"
+        "Rules of origin: Will reduce to 72% if Mexican auto parts include verified "
+        "traceability documentation excluding Chinese-sourced components.\n"
+        "Energy: Canada has not responded to energy pricing demand — this is now "
+        "a blocking issue. No deal without preferential pricing guarantee.\n"
+        "GAGI Assessment: Current Canadian/Mexican positions would leave US GAGI at +0.03 "
+        "vs 2010 — unacceptable. We need at least +0.10 to declare victory.\n\n"
+        "READY_TO_STOP: NO\n"
+        "STOP_REASON: Energy pricing and dairy access not yet secured; "
+        "without these, Trump base will view this as a failed negotiation.",
+
+        # Round 3 — declaring victory
+        "Summary of US gains secured this negotiation:\n"
+        "✓ Zero automotive tariffs — US auto sector protected\n"
+        "✓ Dairy: +12% import quota with 5-year phase-in — real market access\n"
+        "✓ Digital: no data localisation — US cloud platforms win\n"
+        "✓ Labour: $15.50/hr industry-wide floor — Mexican wage arbitrage curtailed\n"
+        "✓ Rules of origin: 72% with verified traceability — Chinese backdoor closed\n"
+        "✓ Energy: Canada has agreed to price stability consultations — a foundation\n"
+        "GAGI Impact: Projected +0.09 vs 2010 baseline — strongest gain since NAFTA 1994.\n"
+        "Political assessment: This deal is presentable as a Trump win. "
+        "Canada and Mexico have made real concessions on every major US priority. "
+        "Further rounds yield diminishing marginal returns.\n\n"
+        "READY_TO_STOP: YES\n"
+        "STOP_REASON: The United States has secured the lion's share — dairy access, "
+        "zero tariffs, wage floors, and digital openness — America First has delivered.",
     ],
     "Canada": [
-        "Automotive tariffs: Accept 0% for CUSMA-compliant vehicles with 3-year phase-in.\n"
-        "Agricultural access: Supply management is constitutionally protected — "
-        "maximum concession is +3% over-quota access with 200%+ tariff maintained.\n"
-        "Digital trade: Cultural exemption is a red line. Accept no-localisation on financial data.\n"
+        # Round 1 — defensive, protecting red lines
+        "Automotive tariffs: Accepting 0% for CUSMA-compliant vehicles — 3-year phase-in "
+        "with C$2B transition fund for Windsor/Oshawa workers.\n"
+        "Agricultural access: Supply management is constitutionally protected and "
+        "politically untouchable. Maximum concession: +3% over-quota access, 200%+ tariff maintained.\n"
+        "Digital trade: Cultural exemption is a constitutional red line — CBC, "
+        "Canadian broadcasters, and French-language content are non-negotiable.\n"
         "Labour standards: $16/hr acceptable over 6-year transition with provincial alignment.\n"
-        "Rules of origin: 70% regional content acceptable; Ontario assembly must qualify.",
+        "Rules of origin: 70% regional content acceptable; Ontario EV battery assembly must qualify.\n"
+        "Energy: Canada will not accept preferential pricing mandates — energy is a "
+        "provincial jurisdiction and cannot be committed to at the federal level.\n"
+        "Diversification note: Canada is in active FTA discussions with ASEAN-5 and "
+        "expanding CETA scope — US leverage is diminishing.\n\n"
+        "READY_TO_STOP: NO\n"
+        "STOP_REASON: US dairy and energy demands remain unacceptable; "
+        "we need further rounds to narrow these gaps.",
 
-        "Automotive tariffs: Agreeing to 0% with domestic transition funding for Windsor plants.\n"
-        "Agricultural access: GAGI analysis shows supply management removal costs 14,000 jobs. "
-        "Counter-offer: +5% quota, 180% tariff, with joint review in year 3.\n"
-        "Digital trade: Cultural exemption extended to streaming platforms. No movement.\n"
-        "Labour standards: Aligned with US $15.50/hr floor, phased over 5 years.\n"
-        "Rules of origin: Accepting 72% with Canadian-made battery packs qualifying.",
+        # Round 2 — domestic adaptation strategy emerging
+        "Automotive tariffs: Agreed 0% with transition funding secured from federal budget.\n"
+        "Agricultural access: GAGI modelling shows supply management removal costs 14,000 "
+        "rural jobs and increases GAGI inequality by 0.08 points. "
+        "Counter: +5% quota, 180% tariff, joint review mechanism in year 3.\n"
+        "Digital trade: Cultural exemption maintained for broadcasting. "
+        "Accepting no-localisation for financial services data only.\n"
+        "Labour standards: Aligning with $15.50/hr floor, phased over 5 years, "
+        "with provincial opt-in mechanism.\n"
+        "Rules of origin: Accepting 72% with Canadian EV battery packs qualifying.\n"
+        "Energy: Federal position unchanged. Ontario/Alberta will not accept pricing mandates.\n"
+        "Domestic adaptation progress: Canada-UK trade corridor operationalised for "
+        "agricultural exports. ASEAN-5 FTA framework agreed in principle. "
+        "US share of Canadian exports projected to fall from 76% to 68% by 2028 "
+        "under current diversification trajectory — reducing CUSMA leverage over time.\n\n"
+        "READY_TO_STOP: NO\n"
+        "STOP_REASON: Supply management and energy terms still unresolved; "
+        "however our diversification strategy is progressing and leverage is shifting.",
+
+        # Round 3 — accepting outcome, domestic strategy as exit
+        "Canada's final assessment:\n"
+        "Supply management: Conceding +8% over-quota access over 7 years — painful but "
+        "manageable with C$1.8B domestic compensation programme.\n"
+        "Automotive: 0% tariffs with EV battery qualification confirmed.\n"
+        "Digital: Cultural exemptions maintained — this was our red line and it held.\n"
+        "Labour: $15.50/hr floor accepted — aligns with planned federal minimum wage path.\n"
+        "Energy: No pricing mandates accepted — this was a US overreach and we held firm.\n"
+        "Domestic strategy: Canada-EU agricultural redirection is now covering 40% of "
+        "the dairy surplus that would enter with the new quota. GAGI impact is neutral to +0.02.\n"
+        "Political assessment: Canadian government can present this as protecting core "
+        "interests while demonstrating resilience. Dairy concession is manageable with "
+        "the compensation fund. We are not winning big — but we are not losing big either, "
+        "and our diversification pathway makes future US leverage weaker.\n\n"
+        "READY_TO_STOP: YES\n"
+        "STOP_REASON: Core interests protected, compensation programme funds the dairy "
+        "transition, and trade diversification makes further CUSMA concessions unnecessary.",
     ],
     "Mexico": [
-        "Automotive tariffs: 0% for CUSMA vehicles; 1.5% on non-qualifying content.\n"
-        "Agricultural access: Avocados, tomatoes, and sugar must remain duty-free — "
-        "these sectors represent 800,000 Mexican agricultural jobs.\n"
-        "Digital trade: Full openness. Foreign investment in cloud infrastructure is a priority.\n"
-        "Labour standards: Flat $16/hr floor ignores Mexico's productivity curve. "
-        "Propose: sectoral floors tied to GAGI-adjusted productivity benchmarks.\n"
-        "Rules of origin: 72% with phased compliance; maquiladora supply chains must qualify.",
+        # Round 1 — defending agricultural and labour sovereignty
+        "Automotive tariffs: 0% for CUSMA-compliant vehicles; 1.5% for non-qualifying content. "
+        "Monterrey auto cluster contributes 2.1% of Mexican GDP — cannot absorb disruption.\n"
+        "Agricultural access: Avocados, tomatoes, sugar, and winter vegetables must remain "
+        "duty-free. These sectors employ 800,000 Mexicans. Non-negotiable.\n"
+        "Digital trade: Full openness supported — FDI in cloud infrastructure is a "
+        "national priority under Plan Mexico Digital.\n"
+        "Labour standards: A flat $16/hr floor is economically incoherent in Mexico. "
+        "GAGI-adjusted productivity benchmarks by sector are the only fair metric. "
+        "Auto sector floor: $12/hr by 2027. Agricultural floor: $8/hr by 2028.\n"
+        "Rules of origin: 72% with phased compliance and maquiladora supply chains qualifying.\n"
+        "Diversification note: Mexico has signed MoUs with 3 Chinese EV manufacturers "
+        "for nearshoring investment — reducing dependency on CUSMA auto sector.\n\n"
+        "READY_TO_STOP: NO\n"
+        "STOP_REASON: Labour floor and agricultural terms still not acceptable; "
+        "our sectoral productivity approach has not been acknowledged by the US.",
 
+        # Round 2 — adaptation strategy taking shape
         "Automotive tariffs: Maintaining 0% for qualifying vehicles. "
-        "GAGI analysis shows Monterrey auto sector contributes 2.1% of GDP — cannot risk disruption.\n"
-        "Agricultural access: Accepting joint agricultural review panel. Avocados non-negotiable.\n"
-        "Digital trade: Supporting open digital trade. Will work with Canada on streaming carve-out.\n"
-        "Labour standards: Accepting $14/hr sectoral floor for auto, $12/hr for agriculture, "
-        "with annual GAGI-linked adjustments.\n"
-        "Rules of origin: 72% with traceability standards; battery components to qualify by 2027.",
+        "Chinese EV investment in Nuevo León now covers 18% of auto export risk if tariffs rise.\n"
+        "Agricultural access: Accepting joint agricultural review panel. Avocados non-negotiable. "
+        "Sugar: accepting US ITC review process with 3-year price floor protection.\n"
+        "Digital trade: Supporting open digital trade framework. Working with Canada "
+        "on a joint streaming platform carve-out to preserve Contenido Nacional rules.\n"
+        "Labour standards: Accepting $13/hr auto floor, $10/hr agriculture, $11/hr manufacturing "
+        "— all GAGI-indexed and reviewed annually. This is our final position.\n"
+        "Rules of origin: 72% with full traceability for auto parts. "
+        "Battery cell sourcing: CATL (China) Mexico-manufactured cells will qualify "
+        "under country-of-assembly rule — this is a Mexican red line.\n"
+        "Diversification progress: ASEAN-Mexico trade volume up 34% YoY. "
+        "EU-Mexico modernised FTA finalised — dairy and auto exports redirectable.\n\n"
+        "READY_TO_STOP: NO\n"
+        "STOP_REASON: Battery sourcing rules and agricultural floors not yet resolved; "
+        "however our diversification trajectory reduces urgency to concede further.",
+
+        # Round 3 — declaring sufficient outcome
+        "Mexico's final assessment:\n"
+        "Automotive: 0% tariffs confirmed. CATL Mexico-manufactured batteries qualify "
+        "under country-of-assembly — this is a major win for our nearshoring strategy.\n"
+        "Agricultural: Avocados, tomatoes, and winter vegetables remain duty-free. "
+        "Sugar: accepted US ITC review with 3-year price floor — manageable.\n"
+        "Digital: Open digital trade framework agreed. National content rules preserved "
+        "through side-letter with Canada.\n"
+        "Labour: Sectoral GAGI-indexed floors accepted — $13/hr auto, $10/hr agriculture. "
+        "This is achievable without GAGI deterioration per our modelling.\n"
+        "Rules of origin: 72% with CATL qualification secured — the most important outcome.\n"
+        "Diversification outcome: EU-Mexico FTA absorbs 22% of trade risk. "
+        "Chinese nearshoring provides automotive resilience. CUSMA is now one of three "
+        "major trade corridors rather than a dependency.\n"
+        "Political assessment: President and Congress can present this as protecting "
+        "workers, farmers, and sovereignty while modernising the trade mix. "
+        "Further rounds would only risk reopening settled issues.\n\n"
+        "READY_TO_STOP: YES\n"
+        "STOP_REASON: Agricultural sovereignty protected, CATL battery ruling secured, "
+        "and trade diversification means Mexico no longer depends on CUSMA maximalism.",
     ],
 }
 
@@ -243,11 +385,16 @@ class _CountryWorkflow(Workflow):
         prompt = (
             f"=== CUSMA Negotiation — Round {round_n} of {MAX_ROUNDS} ===\n"
             f"{urgency}\n"
-            f"Key topics on the table: {', '.join(NEGOTIATION_TOPICS)}.\n"
+            f"Reference topics (not exhaustive — raise any CUSMA-relevant interest): "
+            f"{', '.join(NEGOTIATION_TOPICS)}.\n"
             f"{context_block}\n\n"
-            f"Provide your updated position on all relevant topics. "
+            f"State your updated position on all relevant topics. "
             f"Acknowledge any emerging consensus and state clearly where deadlocks remain. "
-            f"You may introduce new proposals or coercive measures if strategically justified."
+            f"You may introduce new proposals, coercive measures, or domestic adaptation "
+            f"strategies as strategically justified.\n\n"
+            f"IMPORTANT: End your response with EXACTLY these two lines (required every round):\n"
+            f"READY_TO_STOP: YES or NO\n"
+            f"STOP_REASON: one sentence explaining why"
         )
 
         response = self.send(f"{self.country}Negotiator", prompt).content
@@ -297,8 +444,34 @@ def _update_env(
     }
 
 
+# ---------------------------------------------------------------------------
+# Satisfaction parsing — the asymmetric termination signal
+# ---------------------------------------------------------------------------
+
+def _parse_ready(text: str) -> bool:
+    """Return True when the proposal contains 'READY_TO_STOP: YES'."""
+    return bool(re.search(r"READY_TO_STOP\s*:\s*YES", text, re.IGNORECASE))
+
+
+def _parse_stop_reason(text: str) -> str:
+    """Extract the STOP_REASON sentence from a proposal."""
+    m = re.search(r"STOP_REASON\s*:\s*(.+)", text, re.IGNORECASE)
+    return m.group(1).strip() if m else ""
+
+
+def _all_parties_satisfied(step, trajectory) -> bool:
+    """Episode ends when every party signals READY_TO_STOP: YES.
+
+    Each country stops for its own reason:
+    - USA: achieved lion's share — Trump strategy vindicated
+    - Canada/Mexico: core interests protected OR domestic adaptations
+      make further CUSMA concessions strategically unnecessary
+    """
+    return all(_parse_ready(action) for action in step.actions.values())
+
+
 def _token_overlap(a: str, b: str) -> float:
-    """Jaccard similarity of word-token sets — rough proxy for proposal alignment."""
+    """Jaccard similarity of word-token sets."""
     ta = set(re.findall(r"\b\w+\b", a.lower()))
     tb = set(re.findall(r"\b\w+\b", b.lower()))
     if not ta or not tb:
@@ -311,23 +484,24 @@ def _reward_fn(
     actions: Dict[str, str],
     round_n: int,
 ) -> Dict[str, float]:
-    """Score each country by average pairwise proposal overlap with the others.
-    Score is based on the avergate GAGI gain for the country but also political considerations. That is, the reward function considers both the economic benefits and the political feasibility of each proposal and the negotiator may sacrifice the economic well being of his country for political reasons.
-    High overlap ≈ proposals are converging; low overlap ≈ still far apart.
-    This is a simplified convergence metric — in a real negotiation you would
-    use domain-specific scoring (tariff distance, welfare functions, etc.).
+    """Per-party satisfaction reward.
+
+    - 1.0 when READY_TO_STOP: YES (party is satisfied on its own terms)
+    - Otherwise: Jaccard overlap with previous-round proposals measures
+      whether the party's position is stabilising (proxy for progress).
+      Starts at 0.0 in round 1 (no prior round to compare against).
     """
-    countries = list(actions.keys())
+    prev_proposals = env_state.get("proposals", {})
     rewards: Dict[str, float] = {}
-    for country in countries:
-        others = [actions[c] for c in countries if c != country]
-        if others:
-            avg_overlap = sum(
-                _token_overlap(actions[country], o) for o in others
-            ) / len(others)
+    for country, proposal in actions.items():
+        if _parse_ready(proposal):
+            rewards[country] = 1.0
+        elif prev_proposals.get(country):
+            rewards[country] = round(
+                _token_overlap(proposal, prev_proposals[country]), 4
+            )
         else:
-            avg_overlap = 1.0
-        rewards[country] = round(avg_overlap, 4)
+            rewards[country] = 0.0
     return rewards
 
 
@@ -375,7 +549,7 @@ def _print_header(demo: bool) -> None:
     print()
     mode = f"demo (no API calls)" if demo else f"live  model={MODEL}"
     print(f"  Mode       : {mode}")
-    print(f"  Max rounds : {MAX_ROUNDS}   convergence window: {CONV_WINDOW}")
+    print(f"  Max rounds : {MAX_ROUNDS}   (ends when all parties signal READY_TO_STOP: YES)")
     print(f"  Parties    : 🇺🇸 USA  ·  🇨🇦 Canada  ·  🇲🇽 Mexico")
     print(f"  Topics     :")
     for t in NEGOTIATION_TOPICS:
@@ -401,14 +575,34 @@ def _print_round_live(step) -> None:
 
     # Convergence reward bars
     print(f"\n  {'Convergence scores':}")
+    # Satisfaction signals — the asymmetric termination condition
+    print(f"\n  {'Satisfaction signals':}")
+    all_ready = True
+    for country, proposal in step.actions.items():
+        ready = _parse_ready(proposal)
+        reason = _parse_stop_reason(proposal)
+        color = _COUNTRY_COLORS.get(country, "")
+        flag = _COUNTRY_FLAGS.get(country, "")
+        if ready:
+            signal = f"{_BOLD}✓ DONE{_RESET}"
+        else:
+            signal = f"{_DIM}  waiting{_RESET}"
+            all_ready = False
+        print(f"  {color}{flag} {country:<8}{_RESET}  {signal}", end="")
+        if reason:
+            print(f"  {_DIM}{reason[:80]}{_RESET}", end="")
+        print()
+
+    # Convergence/satisfaction reward bars
+    print(f"\n  {'Satisfaction scores':}")
     for country, reward in step.rewards.items():
         color = _COUNTRY_COLORS.get(country, "")
         bar = _bar(reward)
-        trend = " ◀ deadlock" if reward < 0.25 else (" ▶ converging" if reward > 0.45 else "")
-        print(f"  {color}{country:<8}{_RESET}  {bar}  {reward:.3f}{_DIM}{trend}{_RESET}")
+        label = " ★ satisfied" if reward == 1.0 else (" ▶ stabilising" if reward > 0.5 else " ◀ still negotiating")
+        print(f"  {color}{country:<8}{_RESET}  {bar}  {reward:.3f}{_DIM}{label}{_RESET}")
 
-    if step.round == MAX_ROUNDS or getattr(step, '_done', False):
-        print(f"\n  {_YELLOW}{_BOLD}◈ Negotiation concluded after round {r}{_RESET}")
+    if all_ready:
+        print(f"\n  {_YELLOW}{_BOLD}◈ All parties satisfied — negotiation concluded after round {r}{_RESET}")
     print()
 
 
@@ -449,10 +643,7 @@ def main() -> None:
         env={"round": 0, "proposals": {}, "history": []},
         reward_fn=_reward_fn,
         env_update_fn=_update_env,
-        termination_fn=nash_convergence_detector(
-            window=CONV_WINDOW,
-            reward_threshold=CONV_THRESHOLD,
-        ),
+        termination_fn=_all_parties_satisfied,
         max_rounds=MAX_ROUNDS,
         observability=hook,
     )
@@ -472,9 +663,25 @@ def main() -> None:
 
     # -- Outcome --
     _divider("Outcome")
-    converged = summary["done"] and ep.round < MAX_ROUNDS
-    verdict = "✓ Consensus reached" if converged else "✗ Max rounds — no consensus"
+    all_satisfied = summary["done"] and ep.round < MAX_ROUNDS
+    verdict = (
+        "✓ All parties satisfied — negotiation concluded"
+        if all_satisfied
+        else "✗ Max rounds reached — negotiation unresolved"
+    )
     print(f"  {_BOLD}{verdict}{_RESET}")
+
+    # Print per-party stop reasons from the final round
+    if trajectory:
+        final_actions = trajectory[-1].actions
+        print()
+        for country, proposal in final_actions.items():
+            ready = _parse_ready(proposal)
+            reason = _parse_stop_reason(proposal)
+            color = _COUNTRY_COLORS.get(country, "")
+            flag  = _COUNTRY_FLAGS.get(country, "")
+            status = f"{_BOLD}✓ Satisfied{_RESET}" if ready else f"{_DIM}Not satisfied{_RESET}"
+            print(f"  {color}{flag} {country:<8}{_RESET}  {status}  {_DIM}{reason}{_RESET}")
     print(f"  Rounds played  : {summary['rounds']} / {MAX_ROUNDS}")
     print(f"  Wall time      : {elapsed:.1f}s")
     print()
