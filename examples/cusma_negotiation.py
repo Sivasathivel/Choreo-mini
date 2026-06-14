@@ -68,10 +68,14 @@ from choreo_mini.core.workflow import Workflow
 # Config
 # ---------------------------------------------------------------------------
 
-API_KEY   = os.getenv("OPENAI_API_KEY", "").strip()
-MODEL     = os.getenv("CUSMA_MODEL", "gpt-4o-mini")
-MAX_ROUNDS = int(os.getenv("CUSMA_MAX_ROUNDS", "6"))
+API_KEY     = os.getenv("OPENAI_API_KEY", "").strip()
+MODEL       = os.getenv("CUSMA_MODEL", "gpt-4o-mini")
+MAX_ROUNDS  = int(os.getenv("CUSMA_MAX_ROUNDS", "8"))
 CONV_WINDOW = int(os.getenv("CUSMA_CONVERGENCE_WINDOW", "3"))
+# Threshold for Nash convergence: pairwise token-overlap change < this value.
+# Real LLM responses are lexically varied even when converging conceptually,
+# so we use 0.05 (5%) rather than 0.02.
+CONV_THRESHOLD = float(os.getenv("CUSMA_CONVERGENCE_THRESHOLD", "0.05"))
 
 NEGOTIATION_TOPICS = [
     "automotive tariff rates (target: 0–5%)",
@@ -88,34 +92,23 @@ NEGOTIATION_TOPICS = [
 _SYSTEM_PROMPTS: Dict[str, str] = {
     "USA": (
         "You are the United States trade negotiator in a CUSMA/USMCA renegotiation. "
-        "Your priorities: (1) reduce automotive tariffs to 0%, (2) expand US dairy "
-        "and poultry access to Canadian and Mexican markets, (3) strong IP protections "
-        "and no data localisation requirements, (4) enforce labour standards with "
-        "minimum wage floors to prevent wage arbitrage, (5) maintain high rules-of-origin "
-        "content requirements (75%+ regional). "
+        "You are priorities are to maximize the US's economic interests and maintain strong support from political base. You adhere to your parties principles and believe in a zero-sum game, in simple terms, you win at the expense of the other parties."
+        "You can negotiate on any of the topics of economic interests which are part of CUSMA/USMCA."
+        "You are free to use any negotiation tactics to achieve your goals -- including strategic concessions and counter-offers. You are also allowed to make multiple proposals. You are also allowed to use coercion tactics and threats."
         "Be firm on your priorities but show flexibility on secondary issues. "
         "When other parties make concessions, acknowledge them and reciprocate narrowly. "
-        "Respond with a structured proposal covering all five topics. "
+        "Respond with a structured proposal covering all topics. Parallely prepare a list of policy options for each topic as well as a list of potential counter-offers. Also, a list of potential concessions and domestic political considerations/policy modifications. Assess the potential impact of each option from the perspective of the US political landscape as well as the true economic impact to the common US people. You can use GAGI index (arxiv) which is the Gini-inflation adjusted GDP per Capita ratio computed with respect to 2010 to measure the economic wellbeing of the US population."
         "Format: one line per topic, prefixed with the topic name."
     ),
     "Canada": (
         "You are the Canadian trade negotiator in a CUSMA/USMCA renegotiation. "
-        "Your priorities: (1) protect the supply-managed dairy and poultry sectors "
-        "(keep tariffs above 200% for over-quota imports), (2) preserve cultural "
-        "exemptions for digital content, (3) flexible data localisation to protect "
-        "Canadian citizen data, (4) fair dispute-resolution mechanisms, "
-        "(5) maintain automotive parts exemptions for Ontario manufacturing. "
-        "Show willingness to compromise on digital rules if dairy is protected. "
-        "Respond with a structured proposal covering all five topics. "
+        "You have limited options available as you are constrained by domestic political considerations and the need to balance various interest groups. Furthermore, you must consider the impact of any decision on the Canadian economy and the well-being of its citizens. You can use GAGI index (arxiv) which is the Gini-inflation adjusted GDP per Capita ratio computed with respect to 2010 to measure the economic wellbeing of the US population. You also understand that any offer/counter-offer must be carefully considered in the context of Canadian political and economic realities and may need adjustments to internal policies to maximize the benefits for Canadian citizens."
+        "Respond with a structured proposal covering all the topics. "
         "Format: one line per topic, prefixed with the topic name."
     ),
     "Mexico": (
         "You are the Mexican trade negotiator in a CUSMA/USMCA renegotiation. "
-        "Your priorities: (1) lower automotive tariffs and preserve maquiladora "
-        "supply chains, (2) keep agricultural exports (avocados, tomatoes, sugar) "
-        "duty-free, (3) resist rigid wage-floor mandates that ignore productivity "
-        "differences, (4) accept regional content rules if Mexican auto parts qualify, "
-        "(5) support digital trade openness to attract foreign investment. "
+        "You have limited options available as you are constrained by domestic political considerations and the need to balance various interest groups. Furthermore, you must consider the impact of any decision on the Mexican economy and the well-being of its citizens. You can use GAGI index (arxiv) which is the Gini-inflation adjusted GDP per Capita ratio computed with respect to 2010 to measure the economic wellbeing of the Mexican population. You also understand that any offer/counter-offer must be carefully considered in the context of Mexican political and economic realities and may need adjustments to internal policies to maximize the benefits for Mexican citizens."
         "Respond with a structured proposal covering all five topics. "
         "Format: one line per topic, prefixed with the topic name."
     ),
@@ -126,32 +119,68 @@ _SYSTEM_PROMPTS: Dict[str, str] = {
 # LLM factory
 # ---------------------------------------------------------------------------
 
-def _make_llm(demo: bool = False) -> Any:
+_DEMO_RESPONSES: Dict[str, List[str]] = {
+    "USA": [
+        "Automotive tariffs: Demand zero tariffs immediately — any delay signals weakness. "
+        "Counter: if Canada refuses, threaten 25% steel/aluminum tariffs.\n"
+        "Agricultural access: Full dairy/poultry market liberalisation required. "
+        "Canada's supply management is a protectionist relic that costs US farmers $3B/yr.\n"
+        "Digital trade: No data localisation whatsoever. Cloud infrastructure must be open.\n"
+        "Labour standards: $16/hr floor is non-negotiable — prevents Mexican wage arbitrage.\n"
+        "Rules of origin: 75% regional content, strictly enforced. No loopholes for Mexican assembly.",
+
+        "Automotive tariffs: Maintaining zero-tariff demand. GAGI data shows US auto-worker wages "
+        "have stagnated; any concession here is politically fatal.\n"
+        "Agricultural access: Will accept a 5-year phase-in for Canadian dairy quotas, "
+        "but a firm +15% import quota is the floor.\n"
+        "Digital trade: Conceding cultural exemption carve-out for Canada IF dairy deal closes.\n"
+        "Labour standards: Accepting productivity-adjusted floor at $15.50/hr minimum.\n"
+        "Rules of origin: Reducing to 72% if Mexican auto parts meet traceability standards.",
+    ],
+    "Canada": [
+        "Automotive tariffs: Accept 0% for CUSMA-compliant vehicles with 3-year phase-in.\n"
+        "Agricultural access: Supply management is constitutionally protected — "
+        "maximum concession is +3% over-quota access with 200%+ tariff maintained.\n"
+        "Digital trade: Cultural exemption is a red line. Accept no-localisation on financial data.\n"
+        "Labour standards: $16/hr acceptable over 6-year transition with provincial alignment.\n"
+        "Rules of origin: 70% regional content acceptable; Ontario assembly must qualify.",
+
+        "Automotive tariffs: Agreeing to 0% with domestic transition funding for Windsor plants.\n"
+        "Agricultural access: GAGI analysis shows supply management removal costs 14,000 jobs. "
+        "Counter-offer: +5% quota, 180% tariff, with joint review in year 3.\n"
+        "Digital trade: Cultural exemption extended to streaming platforms. No movement.\n"
+        "Labour standards: Aligned with US $15.50/hr floor, phased over 5 years.\n"
+        "Rules of origin: Accepting 72% with Canadian-made battery packs qualifying.",
+    ],
+    "Mexico": [
+        "Automotive tariffs: 0% for CUSMA vehicles; 1.5% on non-qualifying content.\n"
+        "Agricultural access: Avocados, tomatoes, and sugar must remain duty-free — "
+        "these sectors represent 800,000 Mexican agricultural jobs.\n"
+        "Digital trade: Full openness. Foreign investment in cloud infrastructure is a priority.\n"
+        "Labour standards: Flat $16/hr floor ignores Mexico's productivity curve. "
+        "Propose: sectoral floors tied to GAGI-adjusted productivity benchmarks.\n"
+        "Rules of origin: 72% with phased compliance; maquiladora supply chains must qualify.",
+
+        "Automotive tariffs: Maintaining 0% for qualifying vehicles. "
+        "GAGI analysis shows Monterrey auto sector contributes 2.1% of GDP — cannot risk disruption.\n"
+        "Agricultural access: Accepting joint agricultural review panel. Avocados non-negotiable.\n"
+        "Digital trade: Supporting open digital trade. Will work with Canada on streaming carve-out.\n"
+        "Labour standards: Accepting $14/hr sectoral floor for auto, $12/hr for agriculture, "
+        "with annual GAGI-linked adjustments.\n"
+        "Rules of origin: 72% with traceability standards; battery components to qualify by 2027.",
+    ],
+}
+
+
+def _make_country_llm(country: str, demo: bool = False) -> Any:
+    """Create a dedicated LLM instance for one country (own trace in observability)."""
     if demo:
-        _counter = [0]
-        _responses = [
-            "automotive tariff rates: 2.5% phased reduction over 3 years\n"
-            "agricultural market access: limited dairy quota expansion (+5%)\n"
-            "digital trade: no data localisation, strong IP protections\n"
-            "labour standards: minimum wage floor $16/hr phased over 5 years\n"
-            "supply chain rules of origin: 75% regional content required",
-
-            "automotive tariff rates: 0% for CUSMA-compliant vehicles\n"
-            "agricultural market access: protect supply-managed sectors, small quota increase\n"
-            "digital trade: cultural exemptions maintained, limited data rules\n"
-            "labour standards: $16/hr minimum wage acceptable with transition period\n"
-            "supply chain rules of origin: 70% regional content, Mexican parts qualify",
-
-            "automotive tariff rates: 1.5% for non-CUSMA content, 0% otherwise\n"
-            "agricultural market access: dairy quota +3%, avocados stay duty-free\n"
-            "digital trade: open digital trade, no localisation mandates\n"
-            "labour standards: productivity-adjusted floors, not flat $16/hr\n"
-            "supply chain rules of origin: 72% regional content, phased compliance",
-        ]
+        responses = _DEMO_RESPONSES[country]
+        call_count = [0]
 
         def _fake(prompt: str, context=None, **kw) -> str:
-            resp = _responses[_counter[0] % len(_responses)]
-            _counter[0] += 1
+            resp = responses[call_count[0] % len(responses)]
+            call_count[0] += 1
             return resp
 
         return CustomLLM(_fake)
@@ -161,7 +190,7 @@ def _make_llm(demo: bool = False) -> Any:
         endpoint="https://api.openai.com",
         model=MODEL,
         max_retries=2,
-        retry_base_delay=1.0,
+        retry_base_delay=1.5,
     )
 
 
@@ -199,16 +228,26 @@ class _CountryWorkflow(Workflow):
         }
         context_block = ""
         if others:
-            context_block = "\n\nOther parties' last proposals:\n" + "\n---\n".join(
-                f"{country}:\n{proposal}" for country, proposal in others.items()
+            context_block = "\n\nOther parties' positions (previous round):\n" + "\n---\n".join(
+                f"[{country}]\n{proposal}" for country, proposal in others.items()
             )
 
+        rounds_left = MAX_ROUNDS - round_n
+        urgency = (
+            "This is the final round — a failure to reach agreement triggers "
+            "automatic tariff reversion to pre-CUSMA levels."
+            if rounds_left == 0
+            else f"{rounds_left} round(s) remaining after this one."
+        )
+
         prompt = (
-            f"Round {round_n} of {MAX_ROUNDS}. "
-            f"Negotiate on these topics: {', '.join(NEGOTIATION_TOPICS)}."
+            f"=== CUSMA Negotiation — Round {round_n} of {MAX_ROUNDS} ===\n"
+            f"{urgency}\n"
+            f"Key topics on the table: {', '.join(NEGOTIATION_TOPICS)}.\n"
             f"{context_block}\n\n"
-            f"Provide your updated proposal for all five topics. "
-            f"Where you see agreement emerging, say so explicitly."
+            f"Provide your updated position on all relevant topics. "
+            f"Acknowledge any emerging consensus and state clearly where deadlocks remain. "
+            f"You may introduce new proposals or coercive measures if strategically justified."
         )
 
         response = self.send(f"{self.country}Negotiator", prompt).content
@@ -220,15 +259,24 @@ class USAWorkflow(_CountryWorkflow):
     country = "USA"
     system_prompt = _SYSTEM_PROMPTS["USA"]
 
+    def __init__(self, demo: bool = False, observability=None) -> None:
+        super().__init__(llm=_make_country_llm("USA", demo=demo), observability=observability)
+
 
 class CanadaWorkflow(_CountryWorkflow):
     country = "Canada"
     system_prompt = _SYSTEM_PROMPTS["Canada"]
 
+    def __init__(self, demo: bool = False, observability=None) -> None:
+        super().__init__(llm=_make_country_llm("Canada", demo=demo), observability=observability)
+
 
 class MexicoWorkflow(_CountryWorkflow):
     country = "Mexico"
     system_prompt = _SYSTEM_PROMPTS["Mexico"]
+
+    def __init__(self, demo: bool = False, observability=None) -> None:
+        super().__init__(llm=_make_country_llm("Mexico", demo=demo), observability=observability)
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +312,7 @@ def _reward_fn(
     round_n: int,
 ) -> Dict[str, float]:
     """Score each country by average pairwise proposal overlap with the others.
-
+    Score is based on the avergate GAGI gain for the country but also political considerations. That is, the reward function considers both the economic benefits and the political feasibility of each proposal and the negotiator may sacrifice the economic well being of his country for political reasons.
     High overlap ≈ proposals are converging; low overlap ≈ still far apart.
     This is a simplified convergence metric — in a real negotiation you would
     use domain-specific scoring (tariff distance, welfare functions, etc.).
@@ -287,22 +335,80 @@ def _reward_fn(
 # Print helpers
 # ---------------------------------------------------------------------------
 
-def _divider(title: str = "", width: int = 72) -> None:
+_W = 72   # terminal width for dividers
+
+_COUNTRY_FLAGS = {"USA": "🇺🇸", "Canada": "🇨🇦", "Mexico": "🇲🇽"}
+_COUNTRY_COLORS = {
+    "USA":    "\033[34m",    # blue
+    "Canada": "\033[31m",    # red
+    "Mexico": "\033[32m",    # green
+}
+_RESET = "\033[0m"
+_BOLD  = "\033[1m"
+_DIM   = "\033[2m"
+_YELLOW = "\033[33m"
+_CYAN  = "\033[36m"
+
+
+def _bar(value: float, width: int = 12) -> str:
+    filled = int(round(value * width))
+    return "█" * filled + "░" * (width - filled)
+
+
+def _divider(title: str = "", width: int = _W) -> None:
     if title:
-        pad = max(0, (width - len(title) - 4) // 2)
-        print("=" * pad + f"  {title}  " + "=" * pad)
+        inner = f"  {title}  "
+        pad = max(0, (width - len(inner)) // 2)
+        print("─" * pad + inner + "─" * (width - pad - len(inner)))
     else:
-        print("=" * width)
+        print("─" * width)
 
 
-def _print_round(step, round_n: int) -> None:
-    _divider(f"Round {round_n}")
+def _print_header(demo: bool) -> None:
+    print()
+    print("╔" + "═" * (_W - 2) + "╗")
+    title = "CUSMA / USMCA  —  Multi-Agent Trade Negotiation"
+    print("║" + title.center(_W - 2) + "║")
+    sub = "Powered by choreo-mini  ·  Multi-Agent Reinforcement Learning"
+    print("║" + sub.center(_W - 2) + "║")
+    print("╚" + "═" * (_W - 2) + "╝")
+    print()
+    mode = f"demo (no API calls)" if demo else f"live  model={MODEL}"
+    print(f"  Mode       : {mode}")
+    print(f"  Max rounds : {MAX_ROUNDS}   convergence window: {CONV_WINDOW}")
+    print(f"  Parties    : 🇺🇸 USA  ·  🇨🇦 Canada  ·  🇲🇽 Mexico")
+    print(f"  Topics     :")
+    for t in NEGOTIATION_TOPICS:
+        print(f"    • {t}")
+    print()
+
+
+def _print_round_live(step) -> None:
+    """Print one round's proposals immediately after the step completes."""
+    r = step.round
+    print()
+    print("┌" + "─" * (_W - 2) + "┐")
+    label = f"  Round {r} of {MAX_ROUNDS}  "
+    print("│" + label.center(_W - 2) + "│")
+    print("└" + "─" * (_W - 2) + "┘")
+
     for country, proposal in step.actions.items():
-        print(f"\n[{country}]\n{proposal}")
-    print(f"\nRewards: ", end="")
-    for c, r in step.rewards.items():
-        bar = "█" * int(r * 10) + "░" * (10 - int(r * 10))
-        print(f"{c}={r:.2f} {bar}  ", end="")
+        flag = _COUNTRY_FLAGS.get(country, "")
+        color = _COUNTRY_COLORS.get(country, "")
+        header = f"{color}{_BOLD}{flag}  {country}{_RESET}"
+        print(f"\n{header}")
+        print("  " + "\n  ".join(proposal.splitlines()))
+
+    # Convergence reward bars
+    print(f"\n  {'Convergence scores':}")
+    for country, reward in step.rewards.items():
+        color = _COUNTRY_COLORS.get(country, "")
+        bar = _bar(reward)
+        trend = " ◀ deadlock" if reward < 0.25 else (" ▶ converging" if reward > 0.45 else "")
+        print(f"  {color}{country:<8}{_RESET}  {bar}  {reward:.3f}{_DIM}{trend}{_RESET}")
+
+    if step.round == MAX_ROUNDS or getattr(step, '_done', False):
+        print(f"\n  {_YELLOW}{_BOLD}◈ Negotiation concluded after round {r}{_RESET}")
     print()
 
 
@@ -313,21 +419,26 @@ def _print_round(step, round_n: int) -> None:
 def main() -> None:
     demo = not API_KEY
     if demo:
-        print("OPENAI_API_KEY not set — running in demo mode (no real LLM calls).")
-        print("Set OPENAI_API_KEY to run the full negotiation with GPT.\n")
+        print(
+            "\033[33m[demo mode]\033[0m  OPENAI_API_KEY not set — "
+            "using deterministic stub responses.\n"
+            "  Export OPENAI_API_KEY to run the full live negotiation.\n"
+        )
 
     log_path = Path(project_root) / "output" / "cusma_trace.ndjson"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Framework event stream goes to NDJSON only during negotiation rounds;
+    # proposals are printed in full by _print_round_live().
+    # StdoutHook is included so tick marks (→ ←) show timing during API calls.
     hook = CompositeHook(
         StdoutHook(color=True, show_previews=False),
         JsonFileHook(str(log_path), append=False),
     )
 
-    llm = _make_llm(demo=demo)
-    usa    = USAWorkflow(llm=llm,    observability=hook)
-    canada = CanadaWorkflow(llm=llm, observability=hook)
-    mexico = MexicoWorkflow(llm=llm, observability=hook)
+    usa    = USAWorkflow(demo=demo,    observability=hook)
+    canada = CanadaWorkflow(demo=demo, observability=hook)
+    mexico = MexicoWorkflow(demo=demo, observability=hook)
 
     ep = Episode(
         agents={
@@ -340,55 +451,66 @@ def main() -> None:
         env_update_fn=_update_env,
         termination_fn=nash_convergence_detector(
             window=CONV_WINDOW,
-            reward_threshold=0.02,
+            reward_threshold=CONV_THRESHOLD,
         ),
         max_rounds=MAX_ROUNDS,
         observability=hook,
     )
 
-    _divider("CUSMA Trade Negotiation — Multi-Agent LLM Demo")
-    print(f"Model      : {MODEL if not demo else 'demo (CustomLLM)'}")
-    print(f"Max rounds : {MAX_ROUNDS}")
-    print(f"Countries  : USA · Canada · Mexico")
-    print(f"Topics     :")
-    for t in NEGOTIATION_TOPICS:
-        print(f"  • {t}")
-    print()
+    _print_header(demo)
 
     t0 = time.time()
-    trajectory = ep.run()
+
+    # Step manually so each round's proposals print live as they complete.
+    while not ep.done:
+        step = ep.step()
+        _print_round_live(step)
+
     elapsed = time.time() - t0
-
-    # -- Round-by-round recap --
-    _divider("Full Negotiation Transcript")
-    for step in trajectory:
-        _print_round(step, step.round)
-
+    trajectory = ep.trajectory
     summary = ep.summary()
-    _divider("Outcome")
-    print(f"  Rounds to convergence : {summary['rounds']}")
-    print(f"  Converged             : {summary['done']}")
-    print(f"  Wall time             : {elapsed:.1f}s")
-    print(f"  Cumulative rewards    : {summary['cumulative_rewards']}")
-    print(f"  Final actions preview :")
-    for country, proposal in summary["final_actions"].items():
-        first_line = proposal.split("\n")[0]
-        print(f"    [{country}] {first_line}")
 
-    # -- Workflow dumps --
-    _divider("Workflow State Snapshots")
+    # -- Outcome --
+    _divider("Outcome")
+    converged = summary["done"] and ep.round < MAX_ROUNDS
+    verdict = "✓ Consensus reached" if converged else "✗ Max rounds — no consensus"
+    print(f"  {_BOLD}{verdict}{_RESET}")
+    print(f"  Rounds played  : {summary['rounds']} / {MAX_ROUNDS}")
+    print(f"  Wall time      : {elapsed:.1f}s")
+    print()
+    print(f"  Cumulative convergence scores:")
+    for country, total in summary["cumulative_rewards"].items():
+        flag = _COUNTRY_FLAGS.get(country, "")
+        color = _COUNTRY_COLORS.get(country, "")
+        avg = total / max(summary["rounds"], 1)
+        print(f"    {color}{flag} {country:<8}{_RESET}  total={total:.3f}  avg/round={avg:.3f}")
+
+    # -- Final position summary --
+    _divider("Final Positions")
+    for country, proposal in summary["final_actions"].items():
+        flag = _COUNTRY_FLAGS.get(country, "")
+        color = _COUNTRY_COLORS.get(country, "")
+        print(f"\n{color}{_BOLD}{flag} {country}{_RESET}")
+        print("  " + "\n  ".join(proposal.splitlines()))
+
+    # -- Workflow state snapshots --
+    _divider("Workflow Snapshots  (choreo-mini internals)")
     for wf in [usa, canada, mexico]:
         d = wf.dump()
         agent_key = list(d["agents"].keys())[0]
         ag = d["agents"][agent_key]
+        color = _COUNTRY_COLORS.get(wf.country, "")
+        flag  = _COUNTRY_FLAGS.get(wf.country, "")
         print(
-            f"  {wf.country:<8}  calls={ag['call_count']}  "
-            f"latency={ag['total_latency_s']:.3f}s  "
-            f"history_length={ag['history_length']}"
+            f"  {color}{flag} {wf.country:<8}{_RESET}"
+            f"  trace_id={d['trace_id'][:12]}…"
+            f"  calls={ag['call_count']}"
+            f"  latency={ag['total_latency_s']:.3f}s"
+            f"  history={ag['history_length']} msgs"
         )
 
     # -- NDJSON summary --
-    _divider(f"Trace → {log_path}")
+    _divider(f"Trace written → {log_path.name}")
     events = [
         json.loads(line)
         for line in log_path.read_text().splitlines()
@@ -398,9 +520,10 @@ def main() -> None:
     for ev in events:
         t = ev.get("event_type", "?")
         counts[t] = counts.get(t, 0) + 1
-    print(f"Total events: {len(events)}")
+    print(f"  Total events : {len(events)}")
     for etype, count in sorted(counts.items()):
-        print(f"  {etype}: {count}")
+        print(f"    {etype}: {count}")
+    print(f"\n  Full trace: {log_path}")
 
 
 if __name__ == "__main__":
