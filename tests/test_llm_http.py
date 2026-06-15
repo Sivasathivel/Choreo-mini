@@ -21,8 +21,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from choreo_mini.core.llm import LLM, CustomLLM, Message, ToolSchema, ToolCallMessage
-from choreo_mini.core.nodes import AgentNode
+from motif_ai.core.llm import LLM, CustomLLM, Message, ToolSchema, ToolCallMessage
+from motif_ai.core.nodes import AgentNode
 
 
 # ---------------------------------------------------------------------------
@@ -251,21 +251,26 @@ class TestErrorHandling:
     def _make_error_response(self, status: int, body: dict) -> MagicMock:
         resp = MagicMock()
         resp.status_code = status
+        resp.ok = False
         resp.json.return_value = body
         resp.text = str(body)
-        resp.raise_for_status.side_effect = requests.HTTPError(response=resp)
+        resp.headers = {}
         return resp
 
     def test_api_error_message_surfaced(self):
-        llm = LLM(api_key="bad", endpoint="https://api.openai.com", model="m")
+        # max_retries=0: 401 is permanent, should raise immediately without retry
+        llm = LLM(api_key="bad", endpoint="https://api.openai.com", model="m",
+                  max_retries=0)
         with patch("requests.post", return_value=self._make_error_response(
             401, {"error": {"message": "Invalid API key provided"}}
         )):
             with pytest.raises(requests.HTTPError, match="Invalid API key provided"):
                 llm.chat([Message(role="user", content="hi")])
 
-    def test_rate_limit_error_message(self):
-        llm = LLM(api_key="k", endpoint="https://api.openai.com", model="m")
+    def test_rate_limit_raises_after_retries_exhausted(self):
+        # max_retries=0 so we exhaust immediately and get the error
+        llm = LLM(api_key="k", endpoint="https://api.openai.com", model="m",
+                  max_retries=0)
         with patch("requests.post", return_value=self._make_error_response(
             429, {"error": {"message": "Rate limit exceeded"}}
         )):
@@ -273,12 +278,104 @@ class TestErrorHandling:
                 llm.chat([Message(role="user", content="hi")])
 
     def test_status_code_in_error(self):
-        llm = LLM(api_key="k", endpoint="https://api.openai.com", model="m")
+        llm = LLM(api_key="k", endpoint="https://api.openai.com", model="m",
+                  max_retries=0)
         with patch("requests.post", return_value=self._make_error_response(
             500, {"message": "internal error"}
         )):
             with pytest.raises(requests.HTTPError, match="500"):
                 llm.chat([Message(role="user", content="hi")])
+
+
+# ---------------------------------------------------------------------------
+# Retry behaviour
+# ---------------------------------------------------------------------------
+
+class TestRetry:
+    def _ok_response(self, content: str = "ok") -> MagicMock:
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.ok = True
+        resp.json.return_value = {
+            "choices": [{"message": {"content": content, "role": "assistant"},
+                         "finish_reason": "stop"}]
+        }
+        return resp
+
+    def _error_response(self, status: int, retry_after: str | None = None) -> MagicMock:
+        resp = MagicMock()
+        resp.status_code = status
+        resp.ok = False
+        resp.json.return_value = {"error": {"message": f"error {status}"}}
+        resp.text = f"error {status}"
+        resp.headers = {"retry-after": retry_after} if retry_after else {}
+        return resp
+
+    def test_succeeds_on_second_attempt_after_503(self):
+        llm = LLM(api_key="k", endpoint="https://api.openai.com", model="m",
+                  max_retries=2, retry_base_delay=0.0)
+        responses = [self._error_response(503), self._ok_response("hello")]
+        with patch("requests.post", side_effect=responses) as m:
+            with patch("time.sleep"):
+                result = llm.chat([Message(role="user", content="hi")])
+        assert result.content == "hello"
+        assert m.call_count == 2
+
+    def test_raises_after_all_retries_exhausted(self):
+        llm = LLM(api_key="k", endpoint="https://api.openai.com", model="m",
+                  max_retries=2, retry_base_delay=0.0)
+        with patch("requests.post", return_value=self._error_response(429)):
+            with patch("time.sleep"):
+                with pytest.raises(requests.HTTPError, match="429"):
+                    llm.chat([Message(role="user", content="hi")])
+
+    def test_retry_count_respected(self):
+        """With max_retries=2, requests.post should be called exactly 3 times."""
+        llm = LLM(api_key="k", endpoint="https://api.openai.com", model="m",
+                  max_retries=2, retry_base_delay=0.0)
+        with patch("requests.post", return_value=self._error_response(503)) as m:
+            with patch("time.sleep"):
+                with pytest.raises(requests.HTTPError):
+                    llm.chat([Message(role="user", content="hi")])
+        assert m.call_count == 3
+
+    def test_permanent_error_not_retried(self):
+        """401 Unauthorized must not be retried — it's a permanent credential error."""
+        llm = LLM(api_key="k", endpoint="https://api.openai.com", model="m",
+                  max_retries=3, retry_base_delay=0.0)
+        with patch("requests.post", return_value=self._error_response(401)) as m:
+            with pytest.raises(requests.HTTPError, match="401"):
+                llm.chat([Message(role="user", content="hi")])
+        assert m.call_count == 1
+
+    def test_retry_after_header_respected(self):
+        """When the server sends Retry-After: 5, sleep(5) should be called."""
+        llm = LLM(api_key="k", endpoint="https://api.openai.com", model="m",
+                  max_retries=1, retry_base_delay=1.0)
+        responses = [self._error_response(429, retry_after="5"), self._ok_response()]
+        with patch("requests.post", side_effect=responses):
+            with patch("time.sleep") as mock_sleep:
+                llm.chat([Message(role="user", content="hi")])
+        mock_sleep.assert_called_once_with(5.0)
+
+    def test_connection_error_retried(self):
+        """Network failures (ConnectionError) should also be retried."""
+        llm = LLM(api_key="k", endpoint="https://api.openai.com", model="m",
+                  max_retries=1, retry_base_delay=0.0)
+        with patch("requests.post",
+                   side_effect=[requests.ConnectionError("refused"),
+                                 self._ok_response("recovered")]):
+            with patch("time.sleep"):
+                result = llm.chat([Message(role="user", content="hi")])
+        assert result.content == "recovered"
+
+    def test_zero_retries_raises_immediately_on_503(self):
+        llm = LLM(api_key="k", endpoint="https://api.openai.com", model="m",
+                  max_retries=0)
+        with patch("requests.post", return_value=self._error_response(503)) as m:
+            with pytest.raises(requests.HTTPError, match="503"):
+                llm.chat([Message(role="user", content="hi")])
+        assert m.call_count == 1
 
 
 # ---------------------------------------------------------------------------

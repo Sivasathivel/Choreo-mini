@@ -1,4 +1,4 @@
-"""Workflow orchestration for choreo-mini.
+"""Workflow orchestration for motif-ai.
 
 The intended usage pattern is to **subclass** :class:`Workflow` and define
 agents and services as instance attributes inside ``__init__``.  The base
@@ -6,9 +6,9 @@ class handles all state management automatically — conversation history,
 profiling metrics, and epistemic beliefs are available without any extra
 wiring::
 
-    from choreo_mini.core.workflow import Workflow
-    from choreo_mini.core.nodes import AgentNode
-    from choreo_mini.core.llm import CustomLLM
+    from motif_ai.core.workflow import Workflow
+    from motif_ai.core.nodes import AgentNode
+    from motif_ai.core.llm import CustomLLM
 
     class Planner(Workflow):
         def __init__(self):
@@ -23,10 +23,10 @@ wiring::
             result = self.send("Executor", plan.content)
             return result.content
 
-Each :class:`~choreo_mini.core.nodes.AgentNode` created with ``self`` as the
+Each :class:`~motif_ai.core.nodes.AgentNode` created with ``self`` as the
 first argument registers automatically.  The workflow exposes:
 
-* ``self.beliefs`` — a :class:`~choreo_mini.core.belief.BeliefState` shared
+* ``self.beliefs`` — a :class:`~motif_ai.core.belief.BeliefState` shared
   across the entire workflow (environment / world observations).
 * Per-agent belief states accessible via :meth:`get_agent_belief` — each
   agent independently tracks what it believes about the world and other agents.
@@ -40,9 +40,19 @@ import time
 import tracemalloc
 from typing import Any, Dict, List, Optional
 
-from choreo_mini.core.belief import Belief, BeliefState
-from choreo_mini.core.nodes import BaseNode, AgentNode, ServiceNode
-from choreo_mini.core.llm import Message
+from motif_ai.core.belief import Belief, BeliefState
+from motif_ai.core.nodes import BaseNode, AgentNode, ServiceNode
+from motif_ai.core.llm import Message
+from motif_ai.core.exceptions import AgentNotFoundError, AgentRegistrationError
+from motif_ai.core.observability import (
+    ObservabilityHook,
+    AgentCallStart,
+    AgentCallEnd,
+    AgentCallError,
+    new_trace_id,
+    new_span_id,
+    _safe_emit,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -53,15 +63,15 @@ class AgentState:
     """Runtime state for a single agent managed by a :class:`Workflow`.
 
     Holds the full conversation history, per-call profiling metrics, and an
-    independent :class:`~choreo_mini.core.belief.BeliefState` for this agent.
+    independent :class:`~motif_ai.core.belief.BeliefState` for this agent.
     Users never instantiate this directly — the workflow creates and owns it.
 
     Attributes
     ----------
     agent:
-        The :class:`~choreo_mini.core.nodes.AgentNode` this state belongs to.
+        The :class:`~motif_ai.core.nodes.AgentNode` this state belongs to.
     history:
-        Ordered list of :class:`~choreo_mini.core.llm.Message` objects
+        Ordered list of :class:`~motif_ai.core.llm.Message` objects
         representing the full conversation for this agent.
     call_count:
         Number of times this agent has been invoked.
@@ -70,7 +80,7 @@ class AgentState:
     total_memory:
         Cumulative memory delta across all calls in bytes.
     belief:
-        The agent's private :class:`~choreo_mini.core.belief.BeliefState` —
+        The agent's private :class:`~motif_ai.core.belief.BeliefState` —
         what this agent believes about the world and other agents.
     """
 
@@ -97,10 +107,10 @@ class AgentState:
 # ---------------------------------------------------------------------------
 
 class Workflow:
-    """Base class for all choreo-mini agentic workflows.
+    """Base class for all motif-ai agentic workflows.
 
     Subclass this to define your workflow.  Every
-    :class:`~choreo_mini.core.nodes.AgentNode` constructed with ``self`` as
+    :class:`~motif_ai.core.nodes.AgentNode` constructed with ``self`` as
     its first argument registers automatically — no manual bookkeeping needed.
 
     Parameters
@@ -113,14 +123,14 @@ class Workflow:
 
     Built-in state (available to all subclasses)
     --------------------------------------------
-    ``self.beliefs`` : :class:`~choreo_mini.core.belief.BeliefState`
+    ``self.beliefs`` : :class:`~motif_ai.core.belief.BeliefState`
         Workflow-level shared beliefs — observations about the environment
         that span all agents (e.g. current negotiation terms, round number).
     ``self.state`` : dict
         General-purpose key/value store for workflow-level variables.
     ``self.agent_states`` : dict
         Maps agent name → :class:`AgentState`.  Each entry carries its own
-        :class:`~choreo_mini.core.belief.BeliefState` in addition to history
+        :class:`~motif_ai.core.belief.BeliefState` in addition to history
         and profiling counters.
 
     Example
@@ -144,7 +154,12 @@ class Workflow:
                 return response.content
     """
 
-    def __init__(self, name: str, enable_profiling: bool = False) -> None:
+    def __init__(
+        self,
+        name: str,
+        enable_profiling: bool = False,
+        observability: Optional[ObservabilityHook] = None,
+    ) -> None:
         self.name = name
         self.nodes: Dict[str, BaseNode] = {}
         self.root: Optional[BaseNode] = None
@@ -156,8 +171,12 @@ class Workflow:
         self.beliefs: BeliefState = BeliefState()
 
         self.enable_profiling = enable_profiling
-        if self.enable_profiling:
+        if self.enable_profiling and not tracemalloc.is_tracing():
             tracemalloc.start()
+
+        # Observability — stable trace ID for this workflow instance's lifetime
+        self._observability: Optional[ObservabilityHook] = observability
+        self.trace_id: str = new_trace_id()
 
     # ------------------------------------------------------------------
     # Node registration
@@ -194,21 +213,31 @@ class Workflow:
     # ------------------------------------------------------------------
 
     def add_agent(self, agent: AgentNode) -> None:
-        """Register an :class:`~choreo_mini.core.nodes.AgentNode`.
+        """Register an :class:`~motif_ai.core.nodes.AgentNode`.
 
         Called automatically when an ``AgentNode`` is constructed with this
         workflow.  Each agent receives its own :class:`AgentState` (including
-        an independent :class:`~choreo_mini.core.belief.BeliefState`).
+        an independent :class:`~motif_ai.core.belief.BeliefState`).
+
+        Raises
+        ------
+        AgentRegistrationError
+            If an agent with the same name is already registered.
         """
         if agent.name in self.agent_states:
-            raise ValueError(f"Agent '{agent.name}' is already registered in workflow '{self.name}'.")
+            raise AgentRegistrationError(agent.name, self.name)
         self.agent_states[agent.name] = AgentState(agent)
 
     # ------------------------------------------------------------------
     # Messaging
     # ------------------------------------------------------------------
 
-    def send(self, agent_name: str, user_input: str) -> Message:
+    def send(
+        self,
+        agent_name: str,
+        user_input: str,
+        _parent_span_id: str = "",
+    ) -> Message:
         """Send a message to a named agent and return the reply.
 
         Conversation history is maintained automatically.
@@ -216,17 +245,45 @@ class Workflow:
         Parameters
         ----------
         agent_name:
-            Name of a registered :class:`~choreo_mini.core.nodes.AgentNode`.
+            Name of a registered :class:`~motif_ai.core.nodes.AgentNode`.
         user_input:
             The user-turn text to send.
         """
         state = self._get_agent_state(agent_name)
+        span_id = new_span_id()
+
+        if self._observability:
+            _safe_emit(self._observability, AgentCallStart(
+                trace_id=self.trace_id,
+                span_id=span_id,
+                parent_span_id=_parent_span_id,
+                workflow_name=self.name,
+                agent_name=agent_name,
+                prompt_preview=user_input[:200],
+            ))
+
         state.history.append(Message(role="user", content=user_input))
         context = state.history.copy()
 
         snap_before = tracemalloc.take_snapshot() if self.enable_profiling else None
         start = time.time()
-        response = state.agent.execute(context=context)
+        try:
+            response = state.agent.execute(context=context)
+        except Exception as exc:
+            latency = time.time() - start
+            if self._observability:
+                _safe_emit(self._observability, AgentCallError(
+                    trace_id=self.trace_id,
+                    span_id=span_id,
+                    parent_span_id=_parent_span_id,
+                    workflow_name=self.name,
+                    agent_name=agent_name,
+                    latency_s=latency,
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                ))
+            raise
+
         latency = time.time() - start
 
         memory_used = 0.0
@@ -235,22 +292,71 @@ class Workflow:
             memory_used = sum(s.size_diff for s in snap_after.compare_to(snap_before, "lineno"))
 
         self._record(agent_name, state, response, latency, memory_used)
+
+        # Attach call_id so callers can correlate the response to its span.
+        response.call_id = span_id
+
+        if self._observability:
+            _safe_emit(self._observability, AgentCallEnd(
+                trace_id=self.trace_id,
+                span_id=span_id,
+                parent_span_id=_parent_span_id,
+                workflow_name=self.name,
+                agent_name=agent_name,
+                latency_s=latency,
+                memory_bytes=memory_used,
+                response_preview=(response.content or "")[:200],
+            ))
+
         return response
 
-    async def send_async(self, agent_name: str, user_input: str) -> Message:
+    async def send_async(
+        self,
+        agent_name: str,
+        user_input: str,
+        _parent_span_id: str = "",
+    ) -> Message:
         """Async variant of :meth:`send` with full tool-use loop support.
 
         Identical to :meth:`send` except that
-        :meth:`~choreo_mini.core.nodes.AgentNode.execute_async` is called,
+        :meth:`~motif_ai.core.nodes.AgentNode.execute_async` is called,
         which resolves tool calls when the agent has a ``toolset`` configured.
         """
         state = self._get_agent_state(agent_name)
+        span_id = new_span_id()
+
+        if self._observability:
+            _safe_emit(self._observability, AgentCallStart(
+                trace_id=self.trace_id,
+                span_id=span_id,
+                parent_span_id=_parent_span_id,
+                workflow_name=self.name,
+                agent_name=agent_name,
+                prompt_preview=user_input[:200],
+            ))
+
         state.history.append(Message(role="user", content=user_input))
         context = state.history.copy()
 
         snap_before = tracemalloc.take_snapshot() if self.enable_profiling else None
         start = time.time()
-        response = await state.agent.execute_async(context=context)
+        try:
+            response = await state.agent.execute_async(context=context)
+        except Exception as exc:
+            latency = time.time() - start
+            if self._observability:
+                _safe_emit(self._observability, AgentCallError(
+                    trace_id=self.trace_id,
+                    span_id=span_id,
+                    parent_span_id=_parent_span_id,
+                    workflow_name=self.name,
+                    agent_name=agent_name,
+                    latency_s=latency,
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                ))
+            raise
+
         latency = time.time() - start
 
         memory_used = 0.0
@@ -259,6 +365,21 @@ class Workflow:
             memory_used = sum(s.size_diff for s in snap_after.compare_to(snap_before, "lineno"))
 
         self._record(agent_name, state, response, latency, memory_used)
+
+        response.call_id = span_id
+
+        if self._observability:
+            _safe_emit(self._observability, AgentCallEnd(
+                trace_id=self.trace_id,
+                span_id=span_id,
+                parent_span_id=_parent_span_id,
+                workflow_name=self.name,
+                agent_name=agent_name,
+                latency_s=latency,
+                memory_bytes=memory_used,
+                response_preview=(response.content or "")[:200],
+            ))
+
         return response
 
     # ------------------------------------------------------------------
@@ -266,7 +387,7 @@ class Workflow:
     # ------------------------------------------------------------------
 
     def get_agent_belief(self, agent_name: str) -> BeliefState:
-        """Return the private :class:`~choreo_mini.core.belief.BeliefState`
+        """Return the private :class:`~motif_ai.core.belief.BeliefState`
         for the named agent.
 
         Use this to read or update what a specific agent believes — distinct
@@ -306,6 +427,21 @@ class Workflow:
         """Close all tool-client connections held by registered agents."""
         for agent_state in self.agent_states.values():
             await agent_state.agent.close()
+        if self.enable_profiling and tracemalloc.is_tracing():
+            tracemalloc.stop()
+
+    def close_sync(self) -> None:
+        """Synchronous convenience wrapper around :meth:`close`.
+
+        Use this when running a purely synchronous workflow that has no
+        surrounding event loop::
+
+            wf = MyWorkflow(llm=llm)
+            wf.run("task")
+            wf.close_sync()
+        """
+        import asyncio
+        asyncio.run(self.close())
 
     # ------------------------------------------------------------------
     # History & profiling
@@ -319,6 +455,46 @@ class Workflow:
         """Clear the conversation history for the named agent."""
         self._get_agent_state(agent_name).clear_history()
 
+    def dump(self) -> Dict[str, Any]:
+        """Return a complete state snapshot for debugging, logging, or checkpointing.
+
+        The returned dict is JSON-serialisable (all values are plain Python
+        primitives) and captures everything needed to understand the current
+        state of a running or completed workflow::
+
+            import json
+            print(json.dumps(wf.dump(), indent=2))
+
+        Returns
+        -------
+        dict with keys:
+
+        * ``workflow_name`` — workflow identifier.
+        * ``trace_id`` — observability trace ID for this instance.
+        * ``state`` — current ``wf.state`` key/value store.
+        * ``beliefs`` — workflow-level belief snapshot (confidence-weighted).
+        * ``agents`` — per-agent call counts, latency, history length, beliefs.
+        * ``profiling`` — per-agent profiling counters, or ``None`` when
+          ``enable_profiling=False``.
+        """
+        agents_snapshot: Dict[str, Any] = {}
+        for name, s in self.agent_states.items():
+            agents_snapshot[name] = {
+                "call_count": s.call_count,
+                "total_latency_s": round(s.total_latency, 6),
+                "total_memory_bytes": s.total_memory,
+                "history_length": len(s.history),
+                "beliefs": s.belief.snapshot(),
+            }
+        return {
+            "workflow_name": self.name,
+            "trace_id": self.trace_id,
+            "state": dict(self.state),
+            "beliefs": self.beliefs.snapshot(),
+            "agents": agents_snapshot,
+            "profiling": dict(self.profile_data) if self.enable_profiling else None,
+        }
+
     def get_profile(self, agent_name: Optional[str] = None) -> Dict[str, Dict[str, float]]:
         """Return profiling data collected since ``enable_profiling=True``.
 
@@ -331,7 +507,8 @@ class Workflow:
         if agent_name:
             data = self.profile_data.get(agent_name)
             if data is None:
-                raise KeyError(f"No profile data for agent '{agent_name}'.")
+                # Profiling may be disabled or the agent hasn't been called yet.
+                return {agent_name: {"calls": 0, "total_latency": 0.0, "total_memory": 0.0}}
             return {agent_name: data}
         return dict(self.profile_data)
 
@@ -342,9 +519,10 @@ class Workflow:
     def _get_agent_state(self, agent_name: str) -> AgentState:
         state = self.agent_states.get(agent_name)
         if state is None:
-            raise KeyError(
-                f"Agent '{agent_name}' is not registered in workflow '{self.name}'. "
-                f"Registered agents: {list(self.agent_states)}"
+            raise AgentNotFoundError(
+                agent_name=agent_name,
+                workflow_name=self.name,
+                registered_agents=list(self.agent_states),
             )
         return state
 

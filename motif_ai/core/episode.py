@@ -1,7 +1,7 @@
-"""Multi-agent episode loop for choreo-mini.
+"""Multi-agent episode loop for motif-ai.
 
 An :class:`Episode` orchestrates a round-based MARL game across any number of
-:class:`~choreo_mini.core.workflow.Workflow` subclasses.  Each participating
+:class:`~motif_ai.core.workflow.Workflow` subclasses.  Each participating
 workflow exposes an *action method* — a plain Python callable that receives the
 current environment state and the round index and returns an action string.
 
@@ -19,10 +19,10 @@ Design principles
 Quick-start example::
 
     import copy
-    from choreo_mini.core.episode import Episode, nash_convergence_detector
-    from choreo_mini.core.workflow import Workflow
-    from choreo_mini.core.nodes import AgentNode
-    from choreo_mini.core.llm import CustomLLM
+    from motif_ai.core.episode import Episode, nash_convergence_detector
+    from motif_ai.core.workflow import Workflow
+    from motif_ai.core.nodes import AgentNode
+    from motif_ai.core.llm import CustomLLM
 
     # --- define workflows ---
     class CountryWorkflow(Workflow):
@@ -65,8 +65,20 @@ Quick-start example::
 from __future__ import annotations
 
 import copy
+import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
+
+from motif_ai.core.exceptions import EpisodeError
+from motif_ai.core.observability import (
+    ObservabilityHook,
+    EpisodeStepStart,
+    EpisodeStepEnd,
+    new_trace_id,
+    new_span_id,
+    _safe_emit,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +120,7 @@ class Episode:
     agents:
         Mapping of agent name → action callable.  Each callable must have the
         signature ``(env_state: dict, round: int) -> str``.  Typically this
-        is a method on a :class:`~choreo_mini.core.workflow.Workflow` subclass
+        is a method on a :class:`~motif_ai.core.workflow.Workflow` subclass
         (e.g. ``usa_workflow.propose``).
     env:
         The initial environment state.  Any Python value; a shallow copy is
@@ -164,6 +176,7 @@ class Episode:
         env_update_fn: Optional[Callable[[Dict[str, Any], Dict[str, str], int], Any]] = None,
         termination_fn: Optional[Callable[["EpisodeStep", List["EpisodeStep"]], bool]] = None,
         max_rounds: int = 100,
+        observability: Optional[ObservabilityHook] = None,
     ) -> None:
         if not agents:
             raise ValueError("Episode requires at least one agent.")
@@ -172,6 +185,7 @@ class Episode:
 
         self.agents = agents
         self._env = env
+        self._initial_env = copy.deepcopy(env)   # preserved for reset()
         self.reward_fn = reward_fn
         self.env_update_fn = env_update_fn
         self.termination_fn = termination_fn
@@ -180,6 +194,9 @@ class Episode:
         self.trajectory: List[EpisodeStep] = []
         self.round: int = 0
         self.done: bool = False
+
+        self._observability: Optional[ObservabilityHook] = observability
+        self.episode_id: str = new_trace_id()   # stable ID for this episode
 
     # ------------------------------------------------------------------
     # Public interface
@@ -199,17 +216,31 @@ class Episode:
             If the episode is already done.
         """
         if self.done:
-            raise RuntimeError(
-                "Episode is already done. Call reset() to start a new episode."
+            raise EpisodeError(
+                "Episode is already done. Call reset() to start a new episode.",
+                episode_id=self.episode_id,
             )
         if self.round >= self.max_rounds:
             self.done = True
-            raise RuntimeError(
-                f"Episode reached max_rounds ({self.max_rounds}) without terminating."
+            raise EpisodeError(
+                f"Episode reached max_rounds ({self.max_rounds}) without terminating.",
+                episode_id=self.episode_id,
             )
 
         self.round += 1
-        env_snapshot = copy.deepcopy(self._env) if isinstance(self._env, dict) else self._env
+        env_snapshot = copy.deepcopy(self._env)
+        step_span_id = new_span_id()
+
+        if self._observability:
+            _safe_emit(self._observability, EpisodeStepStart(
+                trace_id=self.episode_id,
+                span_id=step_span_id,
+                episode_id=self.episode_id,
+                round_number=self.round,
+                agent_names=list(self.agents),
+            ))
+
+        step_start = time.time()
 
         # collect actions from all agents in registration order
         actions: Dict[str, str] = {}
@@ -237,6 +268,18 @@ class Episode:
         elif self.round >= self.max_rounds:
             self.done = True
 
+        if self._observability:
+            _safe_emit(self._observability, EpisodeStepEnd(
+                trace_id=self.episode_id,
+                span_id=step_span_id,
+                episode_id=self.episode_id,
+                round_number=self.round,
+                actions={k: str(v)[:120] for k, v in actions.items()},
+                rewards=rewards,
+                done=self.done,
+                latency_s=time.time() - step_start,
+            ))
+
         return episode_step
 
     def run(self) -> List[EpisodeStep]:
@@ -260,6 +303,10 @@ class Episode:
         """
         if env is not None:
             self._env = env
+            self._initial_env = copy.deepcopy(env)
+        else:
+            # Restore to the state the episode was constructed with.
+            self._env = copy.deepcopy(self._initial_env)
         self.trajectory = []
         self.round = 0
         self.done = False

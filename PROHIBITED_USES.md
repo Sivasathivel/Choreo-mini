@@ -1,6 +1,6 @@
 # Prohibited Uses Policy
 
-This file is incorporated by reference into the Choreo-Mini Source License.
+This file is incorporated by reference into the MotifAI Source License.
 Use of the Software or any Derivative Work for the purposes below is prohibited.
 
 Last Updated: 2026-03-24

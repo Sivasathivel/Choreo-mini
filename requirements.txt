@@ -1,4 +1,14 @@
-jinja2>=3.0.0
-requests>=2.28.0
-mcp>=1.0.0
-httpx>=0.27.0
+# Install the package in editable mode with all dev dependencies:
+#
+#   pip install -e ".[dev]"
+#
+# This installs motif-ai + pytest + langgraph (needed for conversion tests).
+#
+# Optional backend extras (install only what you need):
+#
+#   pip install -e ".[langgraph]"   # LangGraph + langchain-mcp-adapters
+#   pip install -e ".[crewai]"      # CrewAI + crewai-tools
+#   pip install -e ".[autogen]"     # AutoGen + autogen-ext
+#
+# Runtime dependencies are declared in pyproject.toml [project.dependencies]
+# and are installed automatically with any of the above commands.

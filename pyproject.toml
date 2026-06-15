@@ -3,12 +3,12 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "choreo-mini"
-version = "0.2.0"
-description = "A lightweight Python meta-framework for building, experimenting with, and orchestrating LLM-based agents across multiple runtimes."
+name = "motif-ai"
+version = "0.3.0"
+description = "Lightweight Python framework for multi-agent LLM workflows — MARL episode loop, LLM pool scheduling, OTEL observability, and compile-to-any-runtime."
 readme = "README.md"
 requires-python = ">=3.10"
-license = "LicenseRef-Choreo-Mini-1.2"
+license = "LicenseRef-MotifAI-1.2"
 license-files = ["LICENSE"]
 authors = [
     { name = "Sivasathivel Kandasamy" },
@@ -22,8 +22,16 @@ classifiers = [
     "Operating System :: OS Independent",
     "Intended Audience :: Developers",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: System :: Distributed Computing",
 ]
-keywords = ["llm", "agents", "orchestration", "langgraph", "crewai", "autogen", "ai", "workflow", "agentic"]
+keywords = [
+    "llm", "agents", "agent-framework", "orchestration", "multi-agent",
+    "marl", "multi-agent-reinforcement-learning", "llm-pool", "llm-routing",
+    "observability", "opentelemetry", "otel", "tracing",
+    "langgraph", "crewai", "autogen", "workflow", "agentic",
+    "negotiation", "trade", "episode",
+]
 dependencies = [
     "jinja2>=3.0.0",
     "requests>=2.28.0",
@@ -32,11 +40,11 @@ dependencies = [
 ]
 
 [project.scripts]
-choreo_mini = "choreo_mini.cli:main"
+motif_ai = "motif_ai.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/Sivasathivel/Choreo-mini"
-Source = "https://github.com/Sivasathivel/Choreo-mini"
+Homepage = "https://github.com/Sivasathivel/MotifAI"
+Source = "https://github.com/Sivasathivel/MotifAI"
 "Author LinkedIn" = "https://www.linkedin.com/in/sivasathivelkandasamy/"
 
 [project.optional-dependencies]
@@ -60,13 +68,18 @@ autogen = [
     "autogen",
     "autogen-ext",
 ]
+otel = [
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["choreo_mini", "choreo_mini.*"]
+include = ["motif_ai", "motif_ai.*"]
 
 [tool.setuptools.package-data]
-"choreo_mini" = ["templates/**/*.j2"]
+"motif_ai" = ["templates/**/*.j2"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

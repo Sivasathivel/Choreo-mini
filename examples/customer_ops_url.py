@@ -1,8 +1,22 @@
 """Realistic customer-operations workflow backed by a remote LLM URL.
 
 This example is intentionally richer than ``foo2.py``: it includes service
-pre-processing, four-way routing, escalation, QA review, and looped batch
-handling. It is designed for OpenAI-compatible chat completion endpoints.
+pre-processing, four-way routing, optional risk-lead escalation, QA review,
+and looped batch handling.
+
+**Pattern**: ``CustomerOpsWorkflow`` subclasses ``Workflow`` so it can be
+converted to LangGraph, CrewAI, or AutoGen via the CLI::
+
+    motif_ai -f examples/customer_ops_url.py -b langgraph \\
+                -o output/customer_ops_langgraph.py
+
+To run directly against a real OpenAI-compatible endpoint::
+
+    python examples/customer_ops_url.py
+
+Set ``CHOREO_LLM_URL``, ``CHOREO_API_TOKEN``, and ``CHOREO_LLM_MODEL`` to
+skip the interactive prompts.  Leave ``CHOREO_LLM_URL`` empty to use the
+built-in demo handlers (no network calls required).
 """
 
 import os
@@ -21,9 +35,9 @@ project_root = Path(__file__).resolve().parents[1]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from choreo_mini.core.llm import CustomLLM, Message
-from choreo_mini.core.nodes import AgentNode, ServiceNode
-from choreo_mini.core.workflow import Workflow
+from motif_ai.core.llm import CustomLLM, Message
+from motif_ai.core.nodes import AgentNode, ServiceNode
+from motif_ai.core.workflow import Workflow
 
 
 DEFAULT_MODEL = "gpt-4o-mini"
@@ -50,6 +64,10 @@ SYSTEM_PROMPTS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Remote LLM config
+# ---------------------------------------------------------------------------
+
 @dataclass
 class RemoteLLMConfig:
     endpoint: str
@@ -71,13 +89,15 @@ def _normalize_endpoint(raw_url: str):
 
     if not (url.startswith("http://") or url.startswith("https://")):
         raise ValueError(
-            "LLM URL must start with http:// or https:// (for example https://api.openai.com/v1/responses)"
+            "LLM URL must start with http:// or https:// "
+            "(for example https://api.openai.com/v1/responses)"
         )
 
     parsed = urlparse(url)
     if not parsed.netloc:
         raise ValueError(
-            "LLM URL is missing a hostname (for example https://api.openai.com/v1/responses)"
+            "LLM URL is missing a hostname "
+            "(for example https://api.openai.com/v1/responses)"
         )
 
     if url.endswith("/responses"):
@@ -88,6 +108,10 @@ def _normalize_endpoint(raw_url: str):
         return f"{url}/responses", "responses"
     return f"{url}/v1/responses", "responses"
 
+
+# ---------------------------------------------------------------------------
+# Remote LLM helpers
+# ---------------------------------------------------------------------------
 
 def _serialize_messages(
     system_prompt: str,
@@ -181,7 +205,8 @@ def _call_remote_llm(
                     if exc.response.status_code == 429:
                         raise RuntimeError(
                             "LLM API rate limit hit (429 Too Many Requests). "
-                            "Wait a bit, reduce request frequency, or switch to a key/model with higher limits."
+                            "Wait a bit, reduce request frequency, or switch to a key/model "
+                            "with higher limits."
                         ) from exc
                     raise
 
@@ -204,11 +229,19 @@ def _call_remote_llm(
 
 def _latest_user_text(prompt: str, context: Optional[List[Message]] = None) -> str:
     if context:
-        user_messages = [message.content for message in context if message.role == "user" and message.content]
+        user_messages = [
+            message.content
+            for message in context
+            if message.role == "user" and message.content
+        ]
         if user_messages:
             return user_messages[-1]
     return prompt.splitlines()[-1] if prompt else ""
 
+
+# ---------------------------------------------------------------------------
+# Demo handlers (no network calls — used when demo_mode=True)
+# ---------------------------------------------------------------------------
 
 def _demo_router(prompt: str, context=None, **kwargs) -> str:
     text = _latest_user_text(prompt, context=context).lower()
@@ -228,22 +261,34 @@ def _demo_billing(prompt: str, context=None, **kwargs) -> str:
 
 def _demo_technical(prompt: str, context=None, **kwargs) -> str:
     latest = _latest_user_text(prompt, context=context)
-    return f"Technical desk plan: gather repro details, reference incident playbook, and suggest a stable workaround for {latest}."
+    return (
+        f"Technical desk plan: gather repro details, reference incident playbook, "
+        f"and suggest a stable workaround for {latest}."
+    )
 
 
 def _demo_logistics(prompt: str, context=None, **kwargs) -> str:
     latest = _latest_user_text(prompt, context=context)
-    return f"Logistics desk plan: inspect carrier status, set a delivery expectation, and offer shipment recovery steps for {latest}."
+    return (
+        f"Logistics desk plan: inspect carrier status, set a delivery expectation, "
+        f"and offer shipment recovery steps for {latest}."
+    )
 
 
 def _demo_retention(prompt: str, context=None, **kwargs) -> str:
     latest = _latest_user_text(prompt, context=context)
-    return f"Retention desk plan: acknowledge churn risk, confirm account goals, and present a right-sized save offer for {latest}."
+    return (
+        f"Retention desk plan: acknowledge churn risk, confirm account goals, "
+        f"and present a right-sized save offer for {latest}."
+    )
 
 
 def _demo_risk(prompt: str, context=None, **kwargs) -> str:
     latest = _latest_user_text(prompt, context=context)
-    return f"Risk escalation approved: verify identity, document exposure, and release the guarded action for {latest}."
+    return (
+        f"Risk escalation approved: verify identity, document exposure, "
+        f"and release the guarded action for {latest}."
+    )
 
 
 def _demo_qa(prompt: str, context=None, **kwargs) -> str:
@@ -253,17 +298,15 @@ def _demo_qa(prompt: str, context=None, **kwargs) -> str:
     return f"Customer-ready response: {latest}."
 
 
-def _build_demo_generate_fn(agent_name: str):
-    handlers = {
-        "Router": _demo_router,
-        "BillingDesk": _demo_billing,
-        "TechnicalDesk": _demo_technical,
-        "LogisticsDesk": _demo_logistics,
-        "RetentionDesk": _demo_retention,
-        "RiskLead": _demo_risk,
-        "QAReviewer": _demo_qa,
-    }
-    return handlers[agent_name]
+_DEMO_HANDLERS = {
+    "Router": _demo_router,
+    "BillingDesk": _demo_billing,
+    "TechnicalDesk": _demo_technical,
+    "LogisticsDesk": _demo_logistics,
+    "RetentionDesk": _demo_retention,
+    "RiskLead": _demo_risk,
+    "QAReviewer": _demo_qa,
+}
 
 
 def build_agent_llm(
@@ -273,7 +316,7 @@ def build_agent_llm(
     demo_mode: bool = False,
 ) -> CustomLLM:
     if demo_mode:
-        return CustomLLM(_build_demo_generate_fn(agent_name))
+        return CustomLLM(_DEMO_HANDLERS[agent_name])
     if client_config is None:
         raise ValueError("client_config is required when demo_mode is False")
 
@@ -282,6 +325,10 @@ def build_agent_llm(
 
     return CustomLLM(_generate)
 
+
+# ---------------------------------------------------------------------------
+# Service functions (pure functions — no Workflow state)
+# ---------------------------------------------------------------------------
 
 def parse_cases(raw_batch: str) -> List[Dict[str, Any]]:
     cases: List[Dict[str, Any]] = []
@@ -321,7 +368,9 @@ def prioritize_cases(cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     ranked_cases: List[Dict[str, Any]] = []
     for case in cases:
         issue = case["issue"].lower()
-        if case["customer_tier"] == "vip" or any(word in issue for word in ("chargeback", "fraud", "outage")):
+        if case["customer_tier"] == "vip" or any(
+            word in issue for word in ("chargeback", "fraud", "outage")
+        ):
             priority = "urgent"
         elif any(word in issue for word in ("crash", "refund", "delayed", "cancel")):
             priority = "high"
@@ -338,10 +387,144 @@ def prioritize_cases(cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def format_case(case: Dict[str, Any]) -> str:
     return (
-        f"case_id={case['case_id']} channel={case['channel']} customer_tier={case['customer_tier']} "
-        f"priority={case['priority']} region={case['region']} issue={case['issue']}"
+        f"case_id={case['case_id']} channel={case['channel']} "
+        f"customer_tier={case['customer_tier']} priority={case['priority']} "
+        f"region={case['region']} issue={case['issue']}"
     )
 
+
+# ---------------------------------------------------------------------------
+# Workflow subclass (the conversion target)
+# ---------------------------------------------------------------------------
+
+class CustomerOpsWorkflow(Workflow):
+    """End-to-end customer-operations control tower.
+
+    Agents and service nodes are wired in ``__init__``; the multi-case
+    batch-processing loop lives in ``process_batch``.
+
+    This is the *subclass pattern* — it can be run directly **and** compiled
+    to LangGraph, CrewAI, or AutoGen with the CLI.
+    """
+
+    def __init__(
+        self,
+        client_config: Optional[RemoteLLMConfig] = None,
+        demo_mode: bool = False,
+        observability=None,
+    ):
+        super().__init__("customer_ops_control_tower", enable_profiling=True, observability=observability)
+
+        self.state["batch_number"] = 0
+        self.state["last_batch"] = []
+        self.state["escalations"] = []
+        self.state["follow_ups"] = []
+
+        # Agent nodes
+        self.router = AgentNode(
+            self,
+            "Router",
+            role="customer operations triage router",
+            llm=build_agent_llm("Router", SYSTEM_PROMPTS["Router"],
+                                client_config=client_config, demo_mode=demo_mode),
+        )
+        self.billing_desk = AgentNode(
+            self,
+            "BillingDesk",
+            role="billing operations specialist",
+            llm=build_agent_llm("BillingDesk", SYSTEM_PROMPTS["BillingDesk"],
+                                client_config=client_config, demo_mode=demo_mode),
+        )
+        self.technical_desk = AgentNode(
+            self,
+            "TechnicalDesk",
+            role="technical operations specialist",
+            llm=build_agent_llm("TechnicalDesk", SYSTEM_PROMPTS["TechnicalDesk"],
+                                client_config=client_config, demo_mode=demo_mode),
+        )
+        self.logistics_desk = AgentNode(
+            self,
+            "LogisticsDesk",
+            role="logistics operations specialist",
+            llm=build_agent_llm("LogisticsDesk", SYSTEM_PROMPTS["LogisticsDesk"],
+                                client_config=client_config, demo_mode=demo_mode),
+        )
+        self.retention_desk = AgentNode(
+            self,
+            "RetentionDesk",
+            role="retention specialist",
+            llm=build_agent_llm("RetentionDesk", SYSTEM_PROMPTS["RetentionDesk"],
+                                client_config=client_config, demo_mode=demo_mode),
+        )
+        self.risk_lead = AgentNode(
+            self,
+            "RiskLead",
+            role="risk escalation lead",
+            llm=build_agent_llm("RiskLead", SYSTEM_PROMPTS["RiskLead"],
+                                client_config=client_config, demo_mode=demo_mode),
+        )
+        self.qa_reviewer = AgentNode(
+            self,
+            "QAReviewer",
+            role="quality reviewer",
+            llm=build_agent_llm("QAReviewer", SYSTEM_PROMPTS["QAReviewer"],
+                                client_config=client_config, demo_mode=demo_mode),
+        )
+
+        # Service nodes (pure-function transforms, no LLM)
+        self.case_loader = ServiceNode(self, "CaseLoader", parse_cases)
+        self.priority_tagger = ServiceNode(self, "PriorityTagger", prioritize_cases)
+        self.case_formatter = ServiceNode(self, "CaseFormatter", format_case)
+
+    def process_batch(self, raw_batch: str) -> List[str]:
+        """Parse, prioritise, route, optionally escalate, then QA-review each case.
+
+        Returns a list of customer-ready responses, one per case.
+        """
+        cases = self.case_loader.execute(self, raw_batch)
+        cases = self.priority_tagger.execute(self, cases)
+        self.state["last_batch"] = cases
+        self.state["batch_number"] = self.state["batch_number"] + 1
+
+        results = []
+        for index, case in enumerate(cases, start=1):
+            case_summary = self.case_formatter.execute(self, case)
+            route = self.send("Router", case_summary).content.strip().lower()
+
+            if route == "billing":
+                owner = "BillingDesk"
+            elif route == "technical":
+                owner = "TechnicalDesk"
+            elif route == "logistics":
+                owner = "LogisticsDesk"
+            else:
+                owner = "RetentionDesk"
+
+            draft = self.send(owner, f"case#{index} {case_summary}").content
+
+            if case["needs_risk_review"]:
+                draft = self.send(
+                    "RiskLead",
+                    f"risk review for {owner}: {draft}",
+                ).content
+                self.state["escalations"] = self.state["escalations"] + [case["case_id"]]
+
+            final = self.send(
+                "QAReviewer",
+                f"channel={case['channel']} customer-ready response for {owner}: {draft}",
+            ).content
+
+            if case["channel"] == "chat" or "follow-up" in final.lower():
+                self.state["follow_ups"] = self.state["follow_ups"] + [case["case_id"]]
+
+            results.append(final)
+
+        return results
+
+
+# ---------------------------------------------------------------------------
+# Interactive CLI helper
+# ---------------------------------------------------------------------------
 
 def prompt_for_remote_config() -> RemoteLLMConfig:
     endpoint = os.getenv("CHOREO_LLM_URL", "").strip()
@@ -384,97 +567,22 @@ def prompt_for_remote_config() -> RemoteLLMConfig:
     )
 
 
-def build_customer_ops_workflow(
-    client_config: Optional[RemoteLLMConfig] = None,
-    demo_mode: bool = False,
-):
-    wf = Workflow("customer_ops_control_tower", enable_profiling=True)
-    wf.state["batch_number"] = 0
-    wf.state["last_batch"] = []
-    wf.state["escalations"] = []
-    wf.state["follow_ups"] = []
-
-    router = AgentNode(
-        wf,
-        "Router",
-        role="customer operations triage router",
-        llm=build_agent_llm("Router", SYSTEM_PROMPTS["Router"], client_config=client_config, demo_mode=demo_mode),
-    )
-    billing_desk = AgentNode(
-        wf,
-        "BillingDesk",
-        role="billing operations specialist",
-        llm=build_agent_llm("BillingDesk", SYSTEM_PROMPTS["BillingDesk"], client_config=client_config, demo_mode=demo_mode),
-    )
-    technical_desk = AgentNode(
-        wf,
-        "TechnicalDesk",
-        role="technical operations specialist",
-        llm=build_agent_llm("TechnicalDesk", SYSTEM_PROMPTS["TechnicalDesk"], client_config=client_config, demo_mode=demo_mode),
-    )
-    logistics_desk = AgentNode(
-        wf,
-        "LogisticsDesk",
-        role="logistics operations specialist",
-        llm=build_agent_llm("LogisticsDesk", SYSTEM_PROMPTS["LogisticsDesk"], client_config=client_config, demo_mode=demo_mode),
-    )
-    retention_desk = AgentNode(
-        wf,
-        "RetentionDesk",
-        role="retention specialist",
-        llm=build_agent_llm("RetentionDesk", SYSTEM_PROMPTS["RetentionDesk"], client_config=client_config, demo_mode=demo_mode),
-    )
-    risk_lead = AgentNode(
-        wf,
-        "RiskLead",
-        role="risk escalation lead",
-        llm=build_agent_llm("RiskLead", SYSTEM_PROMPTS["RiskLead"], client_config=client_config, demo_mode=demo_mode),
-    )
-    qa_reviewer = AgentNode(
-        wf,
-        "QAReviewer",
-        role="quality reviewer",
-        llm=build_agent_llm("QAReviewer", SYSTEM_PROMPTS["QAReviewer"], client_config=client_config, demo_mode=demo_mode),
-    )
-
-    case_loader = ServiceNode(wf, "CaseLoader", parse_cases)
-    priority_tagger = ServiceNode(wf, "PriorityTagger", prioritize_cases)
-    case_formatter = ServiceNode(wf, "CaseFormatter", format_case)
-
-    return (
-        wf,
-        router,
-        billing_desk,
-        technical_desk,
-        logistics_desk,
-        retention_desk,
-        risk_lead,
-        qa_reviewer,
-        case_loader,
-        priority_tagger,
-        case_formatter,
-    )
-
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 def main():
-    client_config = prompt_for_remote_config()
-    (
-        wf,
-        router,
-        billing_desk,
-        technical_desk,
-        logistics_desk,
-        retention_desk,
-        risk_lead,
-        qa_reviewer,
-        case_loader,
-        priority_tagger,
-        case_formatter,
-    ) = build_customer_ops_workflow(client_config=client_config)
+    demo_mode = not os.getenv("CHOREO_LLM_URL", "").strip()
+    if demo_mode:
+        print("No CHOREO_LLM_URL set — running in demo mode (no network calls).")
+        wf = CustomerOpsWorkflow(demo_mode=True)
+    else:
+        client_config = prompt_for_remote_config()
+        wf = CustomerOpsWorkflow(client_config=client_config)
 
     print("Enter semicolon-separated cases. Example:")
     print(EXAMPLE_BATCH)
-    print("Press Enter on an empty line or type 'quit' to stop.")
+    print("Press Enter on an empty line or type 'quit' to stop.\n")
 
     while True:
         try:
@@ -482,61 +590,27 @@ def main():
         except (EOFError, KeyboardInterrupt):
             break
 
-        if raw_batch.strip().lower() == "quit":
+        raw_batch = raw_batch.strip()
+        if not raw_batch or raw_batch.lower() == "quit":
             break
-        if not raw_batch.strip():
-            break
 
-        cases = case_loader.execute(wf, raw_batch)
-        cases = priority_tagger.execute(wf, cases)
-        wf.state["last_batch"] = cases
-        wf.state["batch_number"] += 1
+        results = wf.process_batch(raw_batch)
 
-        print(f"\nBatch {wf.state['batch_number']} contains {len(cases)} case(s).")
-
-        for index, case in enumerate(cases, start=1):
-            case_summary = case_formatter.execute(wf, case)
-            route = wf.send("Router", case_summary).content.strip().lower()
-
-            if route == "billing":
-                owner = "BillingDesk"
-            elif route == "technical":
-                owner = "TechnicalDesk"
-            elif route == "logistics":
-                owner = "LogisticsDesk"
-            else:
-                owner = "RetentionDesk"
-
-            draft = wf.send(owner, f"case#{index} {case_summary}").content
-
-            if case["needs_risk_review"]:
-                reviewed = wf.send(
-                    "RiskLead",
-                    f"risk review for {owner}: {draft}",
-                ).content
-                wf.state["escalations"] = wf.state["escalations"] + [case["case_id"]]
-            else:
-                reviewed = draft
-
-            final = wf.send(
-                "QAReviewer",
-                f"channel={case['channel']} customer-ready response for {owner}: {reviewed}",
-            ).content
-
-            if case["channel"] == "chat" or "follow-up" in final.lower():
-                wf.state["follow_ups"] = wf.state["follow_ups"] + [case["case_id"]]
-
-            print(f"[{owner}] {case['case_id']} -> {final}")
-
-        print(f"Escalations: {wf.state['escalations']}")
-        print(f"Follow-ups: {wf.state['follow_ups']}\n")
+        batch_num = wf.state["batch_number"]
+        cases = wf.state["last_batch"]
+        print(f"\nBatch {batch_num} — {len(cases)} case(s) processed.")
+        for case, response in zip(cases, results):
+            print(f"  [{case['case_id']}] {response}")
+        print(f"  Escalations : {wf.state['escalations']}")
+        print(f"  Follow-ups  : {wf.state['follow_ups']}\n")
 
     if wf.enable_profiling:
         print("Profiling summary:")
         for agent_name, stats in wf.profile_data.items():
             print(
-                f"{agent_name}: calls={stats['calls']} "
-                f"latency={stats['total_latency']:.4f}s memory={stats['total_memory']}"
+                f"  {agent_name}: calls={stats['calls']} "
+                f"latency={stats['total_latency']:.4f}s "
+                f"memory={stats['total_memory']}"
             )
 
 

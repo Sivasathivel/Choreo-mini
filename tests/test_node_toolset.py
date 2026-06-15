@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from choreo_mini.core.llm import LLM, Message, ToolCallMessage, ToolCallRequest, ToolSchema
-from choreo_mini.core.nodes import AgentNode
-from choreo_mini.core.tool_clients import BaseToolClient
+from motif_ai.core.llm import LLM, Message, ToolCallMessage, ToolCallRequest, ToolSchema
+from motif_ai.core.nodes import AgentNode
+from motif_ai.core.tool_clients import BaseToolClient
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +106,7 @@ class TestEnsureConnected:
         agent = AgentNode(None, "Bot", role="bot", llm=_EchoLLM(), toolset=ts)
 
         fake_client = _mock_client(["add"])
-        with patch("choreo_mini.core.nodes.create_tool_client", return_value=fake_client):
+        with patch("motif_ai.core.nodes.create_tool_client", return_value=fake_client):
             c1 = await agent._ensure_connected(ts[0])
             c2 = await agent._ensure_connected(ts[0])
 
@@ -124,7 +124,7 @@ class TestEnsureConnected:
         fake_a = _mock_client(["tool_a"])
         fake_b = _mock_client(["tool_b"])
 
-        with patch("choreo_mini.core.nodes.create_tool_client", side_effect=[fake_a, fake_b]):
+        with patch("motif_ai.core.nodes.create_tool_client", side_effect=[fake_a, fake_b]):
             schemas = await agent.get_tool_schemas()
 
         assert len(schemas) == 2
@@ -144,7 +144,7 @@ class TestGetToolSchemas:
         agent = AgentNode(None, "Bot", role="bot", llm=_EchoLLM(), toolset=ts)
 
         fake_client = _mock_client(["add", "sub"])
-        with patch("choreo_mini.core.nodes.create_tool_client", return_value=fake_client):
+        with patch("motif_ai.core.nodes.create_tool_client", return_value=fake_client):
             await agent.get_tool_schemas()
 
         assert agent._tool_owner["add"] == "srv"
@@ -162,7 +162,7 @@ class TestInvokeTool:
         agent = AgentNode(None, "Bot", role="bot", llm=_EchoLLM(), toolset=ts)
 
         fake_client = _mock_client(["add"])
-        with patch("choreo_mini.core.nodes.create_tool_client", return_value=fake_client):
+        with patch("motif_ai.core.nodes.create_tool_client", return_value=fake_client):
             await agent.get_tool_schemas()
             result = await agent.invoke_tool("add", {"a": 1, "b": 2})
 
@@ -219,7 +219,7 @@ class TestExecuteAsyncToolUseLoop:
         agent = AgentNode(None, "Bot", role="calc", llm=llm, toolset=ts)
 
         fake_client = _mock_client(["add"], call_result="7")
-        with patch("choreo_mini.core.nodes.create_tool_client", return_value=fake_client):
+        with patch("motif_ai.core.nodes.create_tool_client", return_value=fake_client):
             result = await agent.execute_async(context="what is 3+4?")
 
         assert isinstance(result, Message)
@@ -250,7 +250,7 @@ class TestExecuteAsyncToolUseLoop:
 
         agent = AgentNode(None, "Bot", role="r", llm=_RecordingLLM(), toolset=ts)
         fake_client = _mock_client(["add"], call_result="result")
-        with patch("choreo_mini.core.nodes.create_tool_client", return_value=fake_client):
+        with patch("motif_ai.core.nodes.create_tool_client", return_value=fake_client):
             await agent.execute_async(context="go")
 
         tool_msgs = [m for m in collected_messages if m.role == "tool"]
@@ -273,7 +273,7 @@ class TestAgentNodeClose:
         fake_a = _mock_client(["tool_a"])
         fake_b = _mock_client(["tool_b"])
 
-        with patch("choreo_mini.core.nodes.create_tool_client", side_effect=[fake_a, fake_b]):
+        with patch("motif_ai.core.nodes.create_tool_client", side_effect=[fake_a, fake_b]):
             await agent.get_tool_schemas()
 
         await agent.close()

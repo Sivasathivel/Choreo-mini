@@ -1,13 +1,13 @@
-"""MCP server exposure for choreo-mini workflows.
+"""MCP server exposure for motif-ai workflows.
 
-Wraps a :class:`~choreo_mini.core.workflow.Workflow` and exposes its agents
+Wraps a :class:`~motif_ai.core.workflow.Workflow` and exposes its agents
 as MCP tools and its belief/history state as MCP resources — making any
-choreo-mini workflow consumable by Claude Desktop, another choreo-mini
+motif-ai workflow consumable by Claude Desktop, another motif-ai
 workflow, or any MCP-compatible client.
 
 Architecture
 ------------
-Each :class:`~choreo_mini.core.nodes.AgentNode` becomes one MCP **tool**:
+Each :class:`~motif_ai.core.nodes.AgentNode` becomes one MCP **tool**:
 
 * **Tool name** — the agent name (e.g. ``"Analyst"``)
 * **Tool description** — the agent's system prompt / role
@@ -17,7 +17,7 @@ Each :class:`~choreo_mini.core.nodes.AgentNode` becomes one MCP **tool**:
 Workflow state is exposed as MCP **resources**:
 
 * ``workflow://{name}/beliefs`` — JSON snapshot of the workflow-level
-  :class:`~choreo_mini.core.belief.BeliefState`
+  :class:`~motif_ai.core.belief.BeliefState`
 * ``workflow://{name}/agents/{agent}/history`` — JSON list of the agent's
   conversation history (role + content)
 
@@ -28,7 +28,7 @@ Transports
 
 Quick start::
 
-    from choreo_mini import WorkflowMCPServer
+    from motif_ai import WorkflowMCPServer
     from my_workflow import MyWorkflow
 
     server = WorkflowMCPServer(MyWorkflow(), host="0.0.0.0", port=8000)
@@ -51,7 +51,7 @@ Claude Desktop config example (stdio)::
 
 where ``mcp_entrypoint.py`` contains::
 
-    from choreo_mini import WorkflowMCPServer
+    from motif_ai import WorkflowMCPServer
     from my_workflow import MyWorkflow
     WorkflowMCPServer(MyWorkflow()).serve_stdio()
 """
@@ -61,11 +61,11 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
-from choreo_mini.core.workflow import Workflow
+from motif_ai.core.workflow import Workflow
 
 
 class WorkflowMCPServer:
-    """Expose a :class:`~choreo_mini.core.workflow.Workflow` as an MCP server.
+    """Expose a :class:`~motif_ai.core.workflow.Workflow` as an MCP server.
 
     Parameters
     ----------
@@ -86,7 +86,7 @@ class WorkflowMCPServer:
     mcp:
         The underlying :class:`mcp.server.fastmcp.FastMCP` instance.
         Exposed so callers can attach additional tools, resources, or
-        prompts beyond what choreo-mini registers automatically.
+        prompts beyond what motif-ai registers automatically.
     """
 
     def __init__(
@@ -126,7 +126,7 @@ class WorkflowMCPServer:
     def _default_instructions(self) -> str:
         agent_names = list(self.workflow.agent_states)
         return (
-            f"This is a choreo-mini workflow server named '{self.workflow.name}'. "
+            f"This is a motif-ai workflow server named '{self.workflow.name}'. "
             f"It exposes {len(agent_names)} agent(s) as tools: {', '.join(agent_names)}. "
             "Send messages to any agent tool and receive its reply. "
             "Use the belief and history resources to inspect workflow state."

@@ -1,6 +1,6 @@
-# Contributing to Choreo-Mini
+# Contributing to MotifAI
 
-Thanks for helping improve Choreo-Mini.
+Thanks for helping improve MotifAI.
 
 ## How to contribute
 
@@ -14,7 +14,7 @@ By submitting a pull request or any contribution for inclusion in this
 repository, you agree that:
 
 1. Your contribution may be distributed as part of this project under
-   the Choreo-Mini Source License (see LICENSE).
+   the MotifAI Source License (see LICENSE).
 2. You grant the maintainer (Sivasathivel Kandasamy) a perpetual,
    worldwide, irrevocable, royalty-free right to use, modify, sublicense,
    and relicense your contribution, including in future dual-licensed or

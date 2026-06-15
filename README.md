@@ -1,97 +1,123 @@
-# Choreo-Mini
+# MotifAI
 
-[![CI](https://github.com/Sivasathivel/Choreo-mini/actions/workflows/ci.yml/badge.svg)](https://github.com/Sivasathivel/Choreo-mini/actions/workflows/ci.yml)
-[![PyPI version](https://img.shields.io/pypi/v/choreo-mini)](https://pypi.org/project/choreo-mini/)
-[![Python versions](https://img.shields.io/pypi/pyversions/choreo-mini)](https://pypi.org/project/choreo-mini/)
+[![CI](https://github.com/Sivasathivel/MotifAI/actions/workflows/ci.yml/badge.svg)](https://github.com/Sivasathivel/MotifAI/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/motif-ai)](https://pypi.org/project/motif-ai/)
+[![Python versions](https://img.shields.io/pypi/pyversions/motif-ai)](https://pypi.org/project/motif-ai/)
 [![License](https://img.shields.io/badge/license-Choreo--Mini--1.2-blue)](LICENSE)
 
-**A lightweight Python meta-framework for building, experimenting with, and orchestrating LLM-based agents.**
-
-Modern agent frameworks — LangGraph, CrewAI, AutoGen — each solve similar orchestration problems but introduce fragmented abstractions and steep learning curves. Choreo-Mini provides a Python-native developer experience that lets you prototype agent workflows quickly, run genuine multi-agent experiments, and compile to any target runtime when you're ready.
-
-Instead of forcing you to commit to a single framework, Choreo-Mini acts as an orchestration meta-layer: express your workflow once in plain Python, and compile it to your target runtime if needed.
+**Lightweight Python framework for multi-agent LLM workflows** — MARL episode loop, cost-aware LLM pool routing, OTEL observability, and optional compile-to-any-runtime.
 
 ---
 
-## What makes Choreo-Mini different
+## What MotifAI does that others don't
 
-| Feature | LangGraph | CrewAI | AutoGen | **Choreo-Mini** |
+| Feature | LangGraph | CrewAI | AutoGen | **MotifAI** |
 |---------|-----------|--------|---------|-----------------|
-| Subclass-based workflow definition | ✗ | ✗ | ✗ | ✓ |
+| Write once, compile to any runtime | ✗ | ✗ | ✗ | ✓ |
 | Epistemic belief state per agent | ✗ | ✗ | ✗ | ✓ |
-| Built-in MARL episode loop | ✗ | ✗ | ✗ | ✓ |
-| Nash convergence detection | ✗ | ✗ | ✗ | ✓ |
-| Export to other frameworks | ✗ | ✗ | ✗ | ✓ |
+| MARL episode loop + custom termination | ✗ | ✗ | ✗ | ✓ |
+| Cost-aware LLM pool with fallback | ✗ | ✗ | ✗ | ✓ |
+| OTEL-compatible tracing out of the box | ✗ | ✗ | ✗ | ✓ |
+| MCP server exposure (zero config) | ✗ | ✗ | ✗ | ✓ |
 | Any OpenAI-compatible endpoint | ✓ | ✓ | ✓ | ✓ |
 
 ---
 
-## How it works
+## Headline demo — CUSMA / USMCA multi-party negotiation
+
+Three AI agents — USA, Canada, Mexico — negotiate a trade agreement in real time. Each country runs its own `Workflow`, calls a real LLM, and signals when it has achieved its goals. The episode ends asymmetrically: **USA stops when it has secured the lion's share; Canada and Mexico stop when core interests are protected OR trade diversification makes further concessions irrelevant.**
+
+```bash
+pip install motif-ai openai
+export OPENAI_API_KEY=sk-...
+python examples/cusma_negotiation.py
+```
+
+Sample terminal output (3 rounds, live):
 
 ```
-Your Python Workflow  (subclass Workflow, define AgentNodes)
-        │
-        ├── Run directly with any OpenAI-compatible endpoint
-        │
-        ├── Run MARL experiments (Episode loop, HUF/reward, Nash convergence)
-        │
-        └── Compile to another runtime (optional)
-                    │
-              AST Parser + Jinja2
-                    │
-           ┌────────┼────────┐
-           ▼        ▼        ▼
-       LangGraph  CrewAI  AutoGen
+╔══════════════════════════════════════════════════════════════════════╗
+║           CUSMA / USMCA  —  Multi-Agent Trade Negotiation            ║
+║    Powered by motif-ai  ·  Multi-Agent Reinforcement Learning     ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+── Round 1 of 8 ──────────────────────────────────────────────────────
+
+🇺🇸  USA
+  Automotive tariffs: Demand immediate zero tariffs. ...
+  READY_TO_STOP: NO
+  STOP_REASON: We have not yet secured dairy access or energy pricing.
+
+🇨🇦  Canada
+  Supply management is constitutionally protected and politically untouchable...
+  READY_TO_STOP: NO
+
+🇲🇽  Mexico
+  A flat $16/hr floor is economically incoherent in Mexico. GAGI-adjusted
+  productivity benchmarks by sector are the only fair metric...
+  READY_TO_STOP: NO
+
+── Round 3 of 8 ──────────────────────────────────────────────────────
+
+🇺🇸  USA   ✓ DONE  "The United States has secured the lion's share —
+                    dairy access, zero tariffs, wage floors, and digital
+                    openness — America First has delivered."
+
+🇨🇦  Canada ✓ DONE  "Core interests protected, trade diversification makes
+                     further CUSMA concessions unnecessary."
+
+🇲🇽  Mexico ✓ DONE  "Agricultural sovereignty protected, CATL battery
+                     ruling secured. CUSMA is now one of three major trade
+                     corridors rather than a dependency."
+
+◈ All parties satisfied — negotiation concluded after round 3
+```
+
+Each party stops for a **different reason**. No Nash equilibrium required.
+
+---
+
+## Installation
+
+```bash
+pip install motif-ai
+```
+
+Optional extras:
+
+```bash
+pip install "motif-ai[otel]"      # OpenTelemetry export
+pip install "motif-ai[langgraph]" # compile to LangGraph
+pip install "motif-ai[crewai]"    # compile to CrewAI
+pip install "motif-ai[autogen]"   # compile to AutoGen
 ```
 
 ---
 
 ## Core concepts
 
-### Workflow subclass pattern
+### Workflow subclass
 
-Define agents as instance attributes — no manual state wiring:
+Define agents as instance attributes. No manual state wiring:
 
 ```python
-from choreo_mini import Workflow, AgentNode, LLM
+from motif_ai import Workflow, AgentNode, LLM
 
 class TradingAdvisor(Workflow):
     def __init__(self, llm):
         super().__init__("trading-advisor")
-        self.analyst  = AgentNode(self, "Analyst",  role="Trade data analyst", llm=llm)
-        self.advisor  = AgentNode(self, "Advisor",  role="Senior policy advisor", llm=llm)
+        self.analyst = AgentNode(self, "Analyst", role="Trade data analyst", llm=llm)
+        self.advisor = AgentNode(self, "Advisor", role="Senior policy advisor", llm=llm)
 
     def advise(self, question: str) -> str:
-        analysis = self.send("Analyst", question)
-        self.beliefs.observe("last_question", question, confidence=1.0)
-        reply = self.send("Advisor", analysis.content)
-        return reply.content
-```
-
-### Epistemic belief state
-
-Every agent and workflow has a confidence-weighted belief map — a capability not found in LangGraph, CrewAI, or AutoGen:
-
-```python
-# workflow-level world beliefs
-wf.beliefs.observe("penalty", 0.12, confidence=0.9, step=round_)
-
-# per-agent theory-of-mind beliefs
-wf.get_agent_belief("Analyst").observe_agent("agent2", "stance", "defensive", confidence=0.7)
-
-# decay beliefs at end of each round (model passage of time)
-wf.decay_all_beliefs(factor=0.95)
-
-# snapshot for logging or passing as context to the LLM
-print(wf.beliefs.snapshot())
+        analysis = self.send("Analyst", question).content
+        return self.send("Advisor", analysis).content
 ```
 
 ### Any OpenAI-compatible endpoint
 
-One class, any provider — no SDK lock-in:
-
 ```python
-from choreo_mini import LLM, CustomLLM
+from motif_ai import LLM, CustomLLM
 
 # OpenAI
 llm = LLM(api_key="sk-...", endpoint="https://api.openai.com", model="gpt-4o")
@@ -103,215 +129,253 @@ llm = LLM(
     headers={"x-api-key": "sk-ant-...", "anthropic-version": "2023-06-01"},
 )
 
-# Local Ollama (no auth)
+# Local Ollama
 llm = LLM(endpoint="http://localhost:11434", model="llama3.2")
 
 # Groq, Together, vLLM, LM Studio, ...
 llm = LLM(api_key="...", endpoint="https://api.groq.com/openai", model="llama-3.3-70b-versatile")
 
-# Any callable — great for tests, local models, or rule-based stubs
+# Any callable — great for tests or rule-based stubs
 llm = CustomLLM(lambda prompt, context=None, **kw: f"echo: {prompt}")
 ```
 
-The `LLM` class normalises endpoint URLs (strips accidental `/v1` suffixes), omits the `Authorization` header when no API key is set, enforces a configurable timeout (default 60 s), and surfaces the full API error body on failures.
+### Epistemic belief state
+
+Every workflow and agent carries a confidence-weighted belief map:
+
+```python
+# record what the workflow has observed
+wf.beliefs.observe("canada_dairy_stance", "defensive", confidence=0.9, step=round_)
+
+# per-agent theory-of-mind beliefs
+wf.get_agent_belief("Analyst").observe_agent("Advisor", "risk_tolerance", "low", confidence=0.7)
+
+# decay beliefs over time (model information aging)
+wf.decay_all_beliefs(factor=0.95)
+
+# snapshot for logging or LLM context injection
+print(wf.beliefs.snapshot())
+```
 
 ### MARL episode loop
 
-Run multi-agent reinforcement learning experiments with reward functions and Nash convergence detection baked in:
+Run multi-party experiments where agents observe each other's actions, receive rewards, and update their proposals each round:
 
 ```python
-from choreo_mini import Episode, nash_convergence_detector
+from motif_ai import Episode, max_rounds_terminator
+
+def huf_reward(agent_id, action, env, step, trajectory):
+    """Your Human Utility Function — score each party's outcome."""
+    ...
 
 ep = Episode(
     agents={
-        "agent1":    agent1_workflow.propose,
-        "agent2": agent2_workflow.propose,
-        "agent3": Agent3_workflow.propose,
+        "USA":    usa_wf.propose,
+        "Canada": canada_wf.propose,
+        "Mexico": mexico_wf.propose,
     },
-    env={"penalty": 0.12, "coverage": 0.65, ...},
-    reward_fn=huf_reward,           # your Human Utility Function
-    env_update_fn=negotiation_step, # how proposals combine into new state
-    termination_fn=nash_convergence_detector(window=5, reward_threshold=0.005),
-    max_rounds=40,
+    reward_fn=huf_reward,
+    termination_fn=_all_parties_satisfied,   # custom — each stops for its own reason
+    max_rounds=8,
 )
 
 trajectory = ep.run()
-print(ep.summary())
 ```
 
-Each `EpisodeStep` records the env snapshot, every agent's action, and every agent's reward — ready to feed a policy-update step.
+The episode records every round's env snapshot, agent actions, and rewards — ready for policy-update steps or downstream analysis.
 
----
+### LLM pool — cost-aware routing with fallback
 
-## MARL experiment — Benefit maximisation
-
-`examples/marl_huf_experiment.py` ships a ready-to-run multi-agent experiment where agent1, agent2, and Agent3 negotiate five trade parameters to maximise their national Human Utility Function scores:
-
-| Parameter | Agent 1 | Agent 2 | Agent 3 |
-|-----------|---------------|-------------------|-------------------|
-| `penalty` | ↓ | ↓ | neutral |
-| `coverage` | neutral | ↑ | ↑ |
-| `safety` | ↑ | neutral | ↓ |
-| `source` | ↑ | neutral | ↓ |
-| `env_score` | ↑ | ↑ | neutral |
-
-```bash
-python examples/marl_huf_experiment.py
-```
-
-Sample output:
-```
-======================================================================
-   MARL — Benefit Maximisation Experiment
-======================================================================
-  Round      Agent1   Agent2   Agent3   GlobalHUF
-  --------------------------------------------
-   init   0.6700   0.6830   0.5290      1.8820
-      1   0.6700   0.6830   0.5290      1.8820
-      ...
-     40   0.7840   1.0000   0.6650      2.4490
-  --------------------------------------------
-  Converged after 40 rounds
-
-  Final trade parameters
-  penalty           0.1200  →  0.0000  (▼ 0.1200)
-  coverage          0.6500  →  1.0000  (▲ 0.3500)
-  safety            0.5500  →  0.7500  (▲ 0.2000)
-  source            0.6200  →  0.6200  (─ 0.0000)
-  env_score         0.5800  →  1.0000  (▲ 0.4200)
-
-  Global Benefit Score: 1.8820  →  2.4500  (+0.5680)
-```
-
-Swap in a real LLM to have agents reason over the parameters in natural language:
+`LLMPool` is a drop-in replacement for `llm=` on any `AgentNode`. It routes across multiple backends according to a policy and falls back transparently on failure:
 
 ```python
-llm = LLM(api_key="sk-...", endpoint="https://api.openai.com", model="gpt-4o")
-agent1 = agent1Workflow(llm=llm)
+from motif_ai import LLMPool, LLMCandidate
+
+pool = LLMPool(
+    candidates=[
+        LLMCandidate(llm=local_llm,  name="local-llama",  cost_per_1k_tokens=0.0),
+        LLMCandidate(llm=gpt4o_mini, name="gpt-4o-mini",  cost_per_1k_tokens=0.15),
+        LLMCandidate(llm=gpt4o,      name="gpt-4o",       cost_per_1k_tokens=2.50),
+    ],
+    policy="cost_first",   # cost_first | priority | round_robin | reliability
+    fallback=True,
+)
+
+self.analyst = AgentNode(self, "Analyst", role="...", llm=pool)
 ```
 
----
+Four routing policies:
 
-## Installation
-
-```bash
-pip install choreo-mini
-```
-
-Or from source:
-
-```bash
-git clone https://github.com/Sivasathivel/Choreo-mini
-cd choreo-mini
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-pytest
-```
-
----
-
-## Quick start — single agent
+| Policy | Behaviour |
+|--------|-----------|
+| `cost_first` | Cheapest first; escalate on failure |
+| `priority` | Explicit preference order independent of cost |
+| `round_robin` | Spread load evenly across equivalent models |
+| `reliability` | Adapts at runtime — candidates that fail more are deprioritised |
 
 ```python
-from choreo_mini import Workflow, AgentNode, LLM
+# inspect routing decisions after a run
+for s in pool.stats:
+    print(f"{s['name']}  calls={s['calls']}  success_rate={s['success_rate']:.0%}")
+```
 
-class Advisor(Workflow):
-    def __init__(self, llm):
-        super().__init__("advisor")
-        self.agent = AgentNode(self, "Advisor", role="Senior trade policy analyst", llm=llm)
+---
 
-    def ask(self, question: str) -> str:
-        return self.send("Advisor", question).content
+## Observability and tracing
 
-llm = LLM(api_key="sk-...", endpoint="https://api.openai.com", model="gpt-4o-mini")
-wf  = Advisor(llm)
-print(wf.ask("What are the three main pillars of CUSMA/USMCA?"))
+Every framework boundary emits a typed event. Pass a hook to any workflow, episode, or pool:
+
+```python
+from motif_ai import StdoutHook, JsonFileHook, CompositeHook, OTLPHook
+
+hook = CompositeHook(
+    StdoutHook(color=True),                      # coloured terminal output
+    JsonFileHook("output/trace.ndjson"),          # NDJSON for offline analysis
+    OTLPHook(endpoint="http://localhost:4317"),   # OpenTelemetry Collector
+)
+
+wf = MyWorkflow(observability=hook)
+ep = Episode(..., observability=hook)
+pool = LLMPool(..., observability=hook)
+```
+
+Built-in events (all carry `trace_id` / `span_id` in OTEL-compatible hex format):
+
+| Event | When |
+|-------|------|
+| `AgentCallStart` / `AgentCallEnd` | Agent receives / returns a message |
+| `LLMRequestStart` / `LLMRequestEnd` | HTTP call to the LLM endpoint |
+| `LLMRetry` | Automatic retry after a transient failure |
+| `EpisodeStepStart` / `EpisodeStepEnd` | Each MARL round (with per-agent rewards) |
+| `LLMPoolRoute` | Which candidate was selected and why |
+| `LLMPoolFallback` | Primary failed; which candidate is next |
+
+Write your own hook in one method:
+
+```python
+class MetricsHook:
+    def on_event(self, event):
+        if isinstance(event, AgentCallEnd):
+            metrics.histogram("agent.latency", event.latency_s, tags={"agent": event.agent_name})
+```
+
+### Full workflow state snapshot
+
+```python
+import json
+print(json.dumps(wf.dump(), indent=2))
+# {
+#   "name": "usa_workflow",
+#   "trace_id": "ba2d02fb2955...",
+#   "agents": {
+#     "USANegotiator": {"calls": 3, "latency_s": 1.42, "history_len": 6}
+#   },
+#   "beliefs": { ... },
+#   "profiling": { ... }
+# }
+```
+
+---
+
+## Structured exceptions
+
+MotifAI raises typed exceptions so you can handle failures precisely:
+
+```python
+from motif_ai import (
+    AgentNotFoundError,   # wf.send() called with an unregistered agent name
+    AgentRegistrationError,  # duplicate agent added to a workflow
+    EpisodeError,         # episode misuse (step after done, etc.)
+    LLMError,             # HTTP / API failure with status code and attempt count
+    ConversionError,      # compile-time eval failure with in-scope variable dump
+)
 ```
 
 ---
 
 ## Compile to another runtime (optional)
 
-When you're ready to migrate to LangGraph, CrewAI, or AutoGen, compile your workflow with the CLI:
+When you're ready to migrate, compile your `Workflow` subclass with the CLI:
 
 ```bash
-choreo_mini -f examples/foo2.py -b langgraph -o output/foo2_langgraph.py
-choreo_mini -f examples/foo2.py -b crewai    -o output/foo2_crewai.py
-choreo_mini -f examples/foo2.py -b autogen   -o output/foo2_autogen.py
+motif_ai -f examples/my_workflow.py -b langgraph -o output/graph.py
+motif_ai -f examples/my_workflow.py -b crewai    -o output/crewai_crew.py
+motif_ai -f examples/my_workflow.py -b autogen   -o output/autogen_agents.py
 ```
 
-OpenAI-compatible remote endpoint example:
-
-```bash
-choreo_mini -f examples/customer_ops_url.py -b langgraph -o output/customer_ops_langgraph.py
-```
-
----
-
-## Observability
-
-When `enable_profiling=True`, every agent call is instrumented automatically:
-
-| Metric | Description |
-|--------|-------------|
-| `calls` | Number of times the agent was invoked |
-| `total_latency` | Cumulative wall-clock inference time (seconds) |
-| `total_memory` | Cumulative memory delta across calls (bytes) |
-| `history` | Full conversation history per agent |
+Only the **subclass pattern** is a valid compilation target:
 
 ```python
-wf = MyWorkflow(enable_profiling=True, llm=llm)
-wf.run("some input")
-print(wf.get_profile("Analyst"))
-# {"Analyst": {"calls": 3, "total_latency": 1.42, "total_memory": 8192}}
+class TicketTriageWorkflow(Workflow):   # ← subclass: compiles ✓
+    def __init__(self):
+        super().__init__("triage")
+        self.classifier = AgentNode(self, "Classifier", role="...", llm=llm)
+        self.reviewer   = AgentNode(self, "Reviewer",   role="...", llm=llm)
+
+    def process(self, ticket: str) -> str:
+        route = self.send("Classifier", ticket).content
+        return self.send("Reviewer", route).content
 ```
+
+A flat `wf = Workflow(...)` inside `main()` runs fine but cannot be compiled — use the subclass pattern from the start if you plan to migrate later.
 
 ---
 
 ## MCP server — expose your workflow to any MCP client
 
-`WorkflowMCPServer` wraps any `Workflow` and makes it instantly accessible from
-Claude Desktop, other choreo-mini workflows, or any MCP-compatible client —
-with zero extra configuration.
-
 ```python
-from choreo_mini import WorkflowMCPServer
+from motif_ai import WorkflowMCPServer
 
-server = WorkflowMCPServer(my_workflow, host="0.0.0.0", port=8000)
-
-server.serve_sse()          # HTTP SSE — accessible over a network
-server.serve_stdio()        # stdio — for Claude Desktop / subprocess
-app = server.sse_app()      # raw Starlette ASGI app for custom uvicorn
+server = WorkflowMCPServer(my_workflow)
+server.serve_sse()    # HTTP SSE for network clients
+server.serve_stdio()  # stdio for Claude Desktop
 ```
 
 What gets registered automatically:
 
 | MCP concept | What it is |
 |-------------|-----------|
-| **Tool** per `AgentNode` | Sends a message to that agent and returns its reply |
-| **Resource** `workflow://{name}/beliefs` | Live JSON snapshot of workflow belief state |
+| **Tool** per `AgentNode` | Send a message to that agent and get its reply |
+| **Resource** `workflow://{name}/beliefs` | Live belief-state snapshot |
 | **Resource** `workflow://{name}/agents/{agent}/history` | Full conversation history |
 
-**Claude Desktop config** (`claude_desktop_config.json`):
+---
 
-```json
-{
-  "mcpServers": {
-    "my-workflow": {
-      "command": "python",
-      "args": ["-m", "my_package.mcp_entrypoint"]
-    }
-  }
-}
+## Quick-start from source
+
+```bash
+git clone https://github.com/Sivasathivel/MotifAI
+cd motif-ai
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+pytest          # 272 tests, all green
+
+# Run the CUSMA negotiation demo (demo mode — no API key needed)
+python examples/cusma_negotiation.py
+
+# Run the LLM pool scheduling demo
+python examples/llm_pool_scheduling.py
 ```
+
+---
+
+## Examples
+
+| File | What it shows |
+|------|--------------|
+| `examples/cusma_negotiation.py` | Three-party trade negotiation with asymmetric termination and live terminal output |
+| `examples/llm_pool_scheduling.py` | Four routing policies — cost_first, priority, round_robin, reliability — with live fallback |
+| `examples/customer_ops_observability.py` | `CompositeHook` with custom `EventCounterHook` and NDJSON logging |
+| `examples/multi_agent_debate.py` | Proponent vs. Opponent in an `Episode` loop with `wf.dump()` snapshot |
+| `examples/customer_ops_url.py` | Four-agent customer-ops triage workflow, compile-ready subclass |
 
 ---
 
 ## Status
 
-Choreo-Mini is an actively developed prototype.
-
-- **Core runtime** (`Workflow`, `AgentNode`, `LLM`, `BeliefState`, `Episode`) — stable, 165 tests passing across Python 3.10–3.13
+- **Core runtime** (`Workflow`, `AgentNode`, `LLM`, `BeliefState`, `Episode`) — stable, **272 tests passing** across Python 3.10–3.13
+- **LLMPool** — production-ready, 4 routing policies, stats, observability events
+- **Observability / OTEL** — full hook system, NDJSON, OTLP export, composite fan-out
 - **MCP client + server** — consume external MCP servers and expose workflows as MCP servers
 - **LangGraph backend** — most mature; supports branching, loop budgets, service node dispatch
 - **CrewAI / AutoGen backends** — structurally correct scaffolding; runtime fidelity in progress
@@ -320,13 +384,11 @@ Choreo-Mini is an actively developed prototype.
 
 ## Roadmap
 
-- **Developer documentation** — full API reference, tutorials, and architecture guide
-- **LLM-driven MARL strategies** — replace fixed-delta strategies with agents that reason over belief states to propose actions
-- **Policy update hooks** — plug gradient or tabular RL updates directly into the `Episode` trajectory
-- **Expanded test coverage** — integration tests against real MCP servers, end-to-end conversion pipeline tests
-- **A2A (agent-to-agent)** — explicit handoffs, delegation, and structured cross-agent messaging
-- **CrewAI / AutoGen parity** — deeper runtime fidelity for routing, loops, and state transitions
-- **CLI improvements** — conversion diagnostics, IR inspection output
+- **Developer documentation** — full API reference, tutorials, architecture guide
+- **Policy update hooks** — plug gradient or tabular RL updates into the `Episode` trajectory
+- **A2A (agent-to-agent)** — explicit handoffs, delegation, structured cross-agent messaging
+- **CrewAI / AutoGen parity** — deeper runtime fidelity for routing, loops, state transitions
+- **Async-native episode** — `async def step()` for concurrent agent calls per round
 
 ---
 
@@ -338,17 +400,16 @@ Choreo-Mini is an actively developed prototype.
 
 ## License
 
-This project is released under the [Choreo-Mini Source License](LICENSE).
+This project is released under the [MotifAI Source License](LICENSE).
 
-**What is allowed:**
-- Use choreo-mini as a library or dependency inside any project, including commercial applications and internal enterprise deployments.
-- Modify the source and contribute back.
-- Keep your larger application closed source when it only depends on choreo-mini and is not itself a derivative of choreo-mini.
-- Ship a proprietary larger product that uses unmodified choreo-mini as a component, with license notices preserved.
+**Allowed:**
+- Use as a library or dependency in any project, including commercial applications
+- Modify and contribute back
+- Keep your larger application closed-source when it only depends on motif-ai
 
-**What is not allowed:**
-- Building and selling a product, plugin, extension, or SaaS where choreo-mini is the core value being offered by a third party.
-- Distributing or hosting a modified derivative of choreo-mini without releasing the derivative source under the same license.
-- Selling paid access to choreo-mini or a derivative API/service, even when bundled with other paid features.
+**Not allowed:**
+- Building and selling a product or SaaS where motif-ai is the core value being offered
+- Distributing a modified derivative without releasing the derivative source under the same license
+- Selling paid access to motif-ai or a derivative API/service
 
-**Other terms:** citation is required in public materials and user-facing interfaces (docs, demos, public repos, benchmark reports, websites, or service UI); contributors grant the author relicensing rights; the author reserves the right to publish enterprise/commercial editions. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution terms.
+Citation is required in public materials. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution terms.

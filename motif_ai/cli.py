@@ -1,4 +1,4 @@
-"""CLI entry point for choreo-mini framework.
+"""CLI entry point for motif-ai framework.
 
 Provides commands to convert Python agent workflows into other frameworks
 like LangGraph, CrewAI, or AutoGen using AST parsing and Jinja2 templates.
@@ -11,7 +11,7 @@ from typing import Dict, Any, List
 
 import jinja2
 
-from choreo_mini.core.ast_parser import parse_workflow_code
+from motif_ai.core.ast_parser import parse_workflow_code
 
 
 def _contains_logic_type(entries: List[Dict[str, Any]], kind: str) -> bool:
@@ -112,7 +112,7 @@ def _build_render_data(workflow_data: Dict[str, Any], backend: str) -> Dict[str,
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Convert choreo-mini workflows to other frameworks")
+    parser = argparse.ArgumentParser(description="Convert motif-ai workflows to other frameworks")
     parser.add_argument("-f", "--input", required=True, help="Input Python file (e.g., foo.py)")
     parser.add_argument("-b", "--backend", required=True, choices=["langgraph", "crewai", "autogen"], help="Target framework")
     parser.add_argument("-o", "--output", required=True, help="Output file path")

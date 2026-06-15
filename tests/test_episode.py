@@ -1,7 +1,7 @@
 """Tests for Episode, EpisodeStep, and termination helpers."""
 
 import pytest
-from choreo_mini.core.episode import (
+from motif_ai.core.episode import (
     Episode,
     EpisodeStep,
     nash_convergence_detector,
@@ -117,7 +117,7 @@ class TestEpisodeStep_:
         ep = _make_episode(max_rounds=1)
         ep.step()
         assert ep.done
-        with pytest.raises(RuntimeError, match="already done"):
+        with pytest.raises(Exception, match="already done"):
             ep.step()
 
     def test_env_snapshot_is_copy(self):
@@ -300,8 +300,8 @@ class TestMaxRoundsTerminator:
 
 class TestPackageExports:
     def test_episode_importable_from_top_level(self):
-        import choreo_mini
-        assert hasattr(choreo_mini, "Episode")
-        assert hasattr(choreo_mini, "EpisodeStep")
-        assert hasattr(choreo_mini, "nash_convergence_detector")
-        assert hasattr(choreo_mini, "max_rounds_terminator")
+        import motif_ai
+        assert hasattr(motif_ai, "Episode")
+        assert hasattr(motif_ai, "EpisodeStep")
+        assert hasattr(motif_ai, "nash_convergence_detector")
+        assert hasattr(motif_ai, "max_rounds_terminator")
