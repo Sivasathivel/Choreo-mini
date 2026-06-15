@@ -75,6 +75,13 @@ MAX_ROUNDS      = int(os.getenv("CUSMA_MAX_ROUNDS", "8"))
 # 1 = only the immediately preceding round; raise for richer continuity at
 # the cost of more tokens.  Default 1 keeps live runs within free-tier TPM.
 MAX_HISTORY_CTX = int(os.getenv("CUSMA_MAX_HISTORY", "1"))
+# Scroll speed for terminal output.  Set to 0 to disable all delays.
+# LINE_DELAY   : seconds between each content line
+# PARTY_PAUSE  : extra pause between countries within a round
+# ROUND_PAUSE  : extra pause before the next round banner
+LINE_DELAY   = float(os.getenv("CUSMA_LINE_DELAY",   "0.06"))
+PARTY_PAUSE  = float(os.getenv("CUSMA_PARTY_PAUSE",  "0.6"))
+ROUND_PAUSE  = float(os.getenv("CUSMA_ROUND_PAUSE",  "1.2"))
 
 # Reference areas — not an exhaustive list; parties may raise any CUSMA-relevant topic.
 REFERENCE_AREAS = [
@@ -939,6 +946,19 @@ def _bar(value: float, width: int = 12) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
+def _println(text: str = "", delay: Optional[float] = None) -> None:
+    """Print a line then sleep so terminal output scrolls at a readable pace."""
+    print(text)
+    sys.stdout.flush()
+    time.sleep(LINE_DELAY if delay is None else delay)
+
+
+def _pause(factor: float = 1.0) -> None:
+    """Blank pause proportional to LINE_DELAY (no text output)."""
+    if LINE_DELAY > 0:
+        time.sleep(LINE_DELAY * factor)
+
+
 def _divider(title: str = "", width: int = _W) -> None:
     if title:
         inner = f"  {title}  "
@@ -971,18 +991,19 @@ def _print_header(demo: bool) -> None:
 
 
 def _print_round_live(step) -> None:
-    """Print one round's proposals immediately after the step completes."""
+    """Print one round's proposals with per-line delays for readable recordings."""
     r = step.round
-    print()
-    print("┌" + "─" * (_W - 2) + "┐")
+    _println()
+    _println("┌" + "─" * (_W - 2) + "┐", delay=0)
     label = f"  Round {r} of {MAX_ROUNDS}  "
-    print("│" + label.center(_W - 2) + "│")
-    print("└" + "─" * (_W - 2) + "┘")
+    _println("│" + label.center(_W - 2) + "│", delay=0)
+    _println("└" + "─" * (_W - 2) + "┘", delay=LINE_DELAY * 4)
 
     for country, proposal in step.actions.items():
         flag  = _COUNTRY_FLAGS.get(country, "")
         color = _COUNTRY_COLORS.get(country, "")
-        print(f"\n{color}{_BOLD}{flag}  {country}{_RESET}")
+
+        _println(f"\n{color}{_BOLD}{flag}  {country}{_RESET}", delay=LINE_DELAY * 2)
 
         neg_pos  = _parse_section(proposal, "NEGOTIATING POSITION")
         dom_pol  = _parse_section(proposal, "DOMESTIC POLICY MEASURES")
@@ -990,24 +1011,29 @@ def _print_round_live(step) -> None:
 
         if neg_pos:
             _section_label("NEGOTIATING POSITION", color)
+            _pause(2)
             for line in neg_pos.splitlines():
-                print(f"  {line}")
+                _println(f"  {line}")
         if dom_pol:
-            print()
+            _println()
             _section_label("DOMESTIC POLICY MEASURES", color)
+            _pause(2)
             for line in dom_pol.splitlines():
-                print(f"  {_DIM}{line}{_RESET}")
+                _println(f"  {_DIM}{line}{_RESET}")
         if nat_int:
-            print()
+            _println()
             _section_label("IN OUR NATIONAL INTEREST", color)
+            _pause(2)
             for line in nat_int.splitlines():
-                print(f"  {_CYAN}{line}{_RESET}")
+                _println(f"  {_CYAN}{line}{_RESET}")
         if not neg_pos and not dom_pol and not nat_int:
-            # Fallback: print raw proposal when sections not found
-            print("  " + "\n  ".join(proposal.splitlines()))
+            for line in proposal.splitlines():
+                _println(f"  {line}")
+
+        time.sleep(PARTY_PAUSE)
 
     # Satisfaction signals
-    print(f"\n  Satisfaction signals")
+    _println(f"\n  Satisfaction signals", delay=LINE_DELAY * 3)
     all_ready = True
     for country, proposal in step.actions.items():
         ready  = _parse_ready(proposal)
@@ -1017,13 +1043,11 @@ def _print_round_live(step) -> None:
         signal = f"{_BOLD}✓ DONE{_RESET}" if ready else f"{_DIM}  waiting{_RESET}"
         if not ready:
             all_ready = False
-        print(f"  {color}{flag} {country:<8}{_RESET}  {signal}", end="")
-        if reason:
-            print(f"  {_DIM}{reason[:78]}{_RESET}", end="")
-        print()
+        suffix = f"  {_DIM}{reason[:78]}{_RESET}" if reason else ""
+        _println(f"  {color}{flag} {country:<8}{_RESET}  {signal}{suffix}")
 
     # Satisfaction reward bars
-    print(f"\n  Satisfaction scores")
+    _println(f"\n  Satisfaction scores", delay=LINE_DELAY * 3)
     for country, reward in step.rewards.items():
         color = _COUNTRY_COLORS.get(country, "")
         bar   = _bar(reward)
@@ -1033,11 +1057,13 @@ def _print_round_live(step) -> None:
             lbl = " ▶ stabilising"
         else:
             lbl = " ◀ still negotiating"
-        print(f"  {color}{country:<8}{_RESET}  {bar}  {reward:.3f}{_DIM}{lbl}{_RESET}")
+        _println(f"  {color}{country:<8}{_RESET}  {bar}  {reward:.3f}{_DIM}{lbl}{_RESET}")
 
     if all_ready:
-        print(f"\n  {_YELLOW}{_BOLD}◈ All parties satisfied — negotiation concluded after round {r}{_RESET}")
-    print()
+        _println(f"\n  {_YELLOW}{_BOLD}◈ All parties satisfied — negotiation concluded after round {r}{_RESET}",
+                 delay=LINE_DELAY * 4)
+    _println()
+    time.sleep(ROUND_PAUSE)
 
 
 def _print_deadlock(trajectory, rounds_played: int) -> None:
