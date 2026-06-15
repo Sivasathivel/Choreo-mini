@@ -1,13 +1,13 @@
-"""Choreo-Mini — Python-native LLM agent workflow orchestration."""
+"""MotifAI — Python-native LLM agent workflow orchestration."""
 
-from choreo_mini.core.belief import Belief, BeliefState
-from choreo_mini.core.workflow import Workflow, AgentState
-from choreo_mini.core.nodes import AgentNode, ServiceNode
-from choreo_mini.core.llm import LLM, CustomLLM, Message, ToolSchema, ToolCallRequest, ToolCallMessage
-from choreo_mini.core.episode import Episode, EpisodeStep, nash_convergence_detector, max_rounds_terminator
-from choreo_mini.core.pool import LLMCandidate, LLMPool
-from choreo_mini.core.mcp_server import WorkflowMCPServer
-from choreo_mini.core.exceptions import (
+from motif_ai.core.belief import Belief, BeliefState
+from motif_ai.core.workflow import Workflow, AgentState
+from motif_ai.core.nodes import AgentNode, ServiceNode
+from motif_ai.core.llm import LLM, CustomLLM, Message, ToolSchema, ToolCallRequest, ToolCallMessage
+from motif_ai.core.episode import Episode, EpisodeStep, nash_convergence_detector, max_rounds_terminator
+from motif_ai.core.pool import LLMCandidate, LLMPool
+from motif_ai.core.mcp_server import WorkflowMCPServer
+from motif_ai.core.exceptions import (
     ChoreoError,
     WorkflowError,
     AgentNotFoundError,
@@ -16,7 +16,7 @@ from choreo_mini.core.exceptions import (
     LLMError,
     ConversionError,
 )
-from choreo_mini.core.observability import (
+from motif_ai.core.observability import (
     ObservabilityHook,
     ObservabilityEvent,
     AgentCallStart,

@@ -7,7 +7,7 @@ and looped batch handling.
 **Pattern**: ``CustomerOpsWorkflow`` subclasses ``Workflow`` so it can be
 converted to LangGraph, CrewAI, or AutoGen via the CLI::
 
-    choreo_mini -f examples/customer_ops_url.py -b langgraph \\
+    motif_ai -f examples/customer_ops_url.py -b langgraph \\
                 -o output/customer_ops_langgraph.py
 
 To run directly against a real OpenAI-compatible endpoint::
@@ -35,9 +35,9 @@ project_root = Path(__file__).resolve().parents[1]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from choreo_mini.core.llm import CustomLLM, Message
-from choreo_mini.core.nodes import AgentNode, ServiceNode
-from choreo_mini.core.workflow import Workflow
+from motif_ai.core.llm import CustomLLM, Message
+from motif_ai.core.nodes import AgentNode, ServiceNode
+from motif_ai.core.workflow import Workflow
 
 
 DEFAULT_MODEL = "gpt-4o-mini"

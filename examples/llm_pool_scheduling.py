@@ -1,15 +1,15 @@
 """Cost- and constraint-aware LLM pool scheduling — end-to-end example.
 
-Demonstrates all four routing policies of :class:`~choreo_mini.core.pool.LLMPool`
-inside a real :class:`~choreo_mini.core.workflow.Workflow` subclass.
+Demonstrates all four routing policies of :class:`~motif_ai.core.pool.LLMPool`
+inside a real :class:`~motif_ai.core.workflow.Workflow` subclass.
 Every routing decision and fallback is traced live via
-:class:`~choreo_mini.core.observability.StdoutHook`.
+:class:`~motif_ai.core.observability.StdoutHook`.
 
 Run with no configuration needed::
 
     python examples/llm_pool_scheduling.py
 
-Swap ``CustomLLM`` for a real :class:`~choreo_mini.core.llm.LLM` instance to
+Swap ``CustomLLM`` for a real :class:`~motif_ai.core.llm.LLM` instance to
 route actual API calls across multiple providers.
 
 Scenario
@@ -44,11 +44,11 @@ project_root = Path(__file__).resolve().parents[1]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from choreo_mini.core.llm import CustomLLM
-from choreo_mini.core.nodes import AgentNode
-from choreo_mini.core.observability import CompositeHook, JsonFileHook, StdoutHook
-from choreo_mini.core.pool import LLMCandidate, LLMPool
-from choreo_mini.core.workflow import Workflow
+from motif_ai.core.llm import CustomLLM
+from motif_ai.core.nodes import AgentNode
+from motif_ai.core.observability import CompositeHook, JsonFileHook, StdoutHook
+from motif_ai.core.pool import LLMCandidate, LLMPool
+from motif_ai.core.workflow import Workflow
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-"""Cost- and constraint-aware LLM pool for choreo-mini.
+"""Cost- and constraint-aware LLM pool for motif-ai.
 
 An :class:`LLMPool` holds multiple :class:`LLMCandidate` backends and selects
 which one to call on each request according to a pluggable routing *policy*.
@@ -7,11 +7,11 @@ next candidate in policy order, so transient failures in a primary model do not
 bubble up to the caller.
 
 Because :class:`LLMPool` exposes the same ``generate`` / ``chat`` / ``stream``
-interface as :class:`~choreo_mini.core.llm.LLM` and
-:class:`~choreo_mini.core.llm.CustomLLM`, it can be passed directly to any
-:class:`~choreo_mini.core.nodes.AgentNode`::
+interface as :class:`~motif_ai.core.llm.LLM` and
+:class:`~motif_ai.core.llm.CustomLLM`, it can be passed directly to any
+:class:`~motif_ai.core.nodes.AgentNode`::
 
-    from choreo_mini.core.pool import LLMCandidate, LLMPool
+    from motif_ai.core.pool import LLMCandidate, LLMPool
 
     fast   = LLMCandidate(llm=gpt4o_mini, name="gpt-4o-mini", cost_per_1k_tokens=0.15)
     strong = LLMCandidate(llm=gpt4o,      name="gpt-4o",      cost_per_1k_tokens=2.50)
@@ -46,9 +46,9 @@ Routing policies
 
 Observability
 -------------
-Every routing decision emits an :class:`~choreo_mini.core.observability.LLMPoolRoute`
-event; every fallback emits an :class:`~choreo_mini.core.observability.LLMPoolFallback`
-event.  Pass an :class:`~choreo_mini.core.observability.ObservabilityHook` to the
+Every routing decision emits an :class:`~motif_ai.core.observability.LLMPoolRoute`
+event; every fallback emits an :class:`~motif_ai.core.observability.LLMPoolFallback`
+event.  Pass an :class:`~motif_ai.core.observability.ObservabilityHook` to the
 pool constructor to capture these.
 """
 
@@ -59,8 +59,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, Generator, List, Optional, Union
 
-from choreo_mini.core.llm import Message, ToolCallMessage, ToolSchema
-from choreo_mini.core.observability import (
+from motif_ai.core.llm import Message, ToolCallMessage, ToolSchema
+from motif_ai.core.observability import (
     LLMPoolFallback,
     LLMPoolRoute,
     ObservabilityHook,
@@ -84,8 +84,8 @@ class LLMCandidate:
     ----------
     llm:
         Any object with a ``generate`` / ``chat`` / ``stream`` / ``chat_async``
-        method — i.e. an :class:`~choreo_mini.core.llm.LLM` or
-        :class:`~choreo_mini.core.llm.CustomLLM` instance.
+        method — i.e. an :class:`~motif_ai.core.llm.LLM` or
+        :class:`~motif_ai.core.llm.CustomLLM` instance.
     name:
         Human-readable identifier shown in observability events.  Defaults to
         ``f"candidate_{id}"`` when not set.
@@ -161,12 +161,12 @@ class LLMPool:
     fallback:
         When ``True`` (default), the pool catches exceptions from a candidate
         and retries with the next one in policy order, emitting an
-        :class:`~choreo_mini.core.observability.LLMPoolFallback` event.
+        :class:`~motif_ai.core.observability.LLMPoolFallback` event.
         When ``False``, the first failure propagates immediately.
     name:
         Pool identifier shown in observability events.
     observability:
-        An :class:`~choreo_mini.core.observability.ObservabilityHook` instance
+        An :class:`~motif_ai.core.observability.ObservabilityHook` instance
         to receive ``llm_pool_route`` and ``llm_pool_fallback`` events.
 
     Attributes
@@ -307,8 +307,8 @@ class LLMPool:
     ) -> str:
         """Generate a response, routing through the pool's policy.
 
-        Compatible with :meth:`~choreo_mini.core.llm.LLM.generate` and
-        :meth:`~choreo_mini.core.llm.CustomLLM.generate`.
+        Compatible with :meth:`~motif_ai.core.llm.LLM.generate` and
+        :meth:`~motif_ai.core.llm.CustomLLM.generate`.
         """
         return self._call_with_fallback("generate", prompt, context=context, **kwargs)
 
@@ -382,7 +382,7 @@ class LLMPool:
     ) -> Union[Message, ToolCallMessage]:
         """Send a full conversation history through the pool.
 
-        Compatible with :meth:`~choreo_mini.core.llm.LLM.chat`.
+        Compatible with :meth:`~motif_ai.core.llm.LLM.chat`.
         """
         return self._call_with_fallback("chat", messages, tools, **kwargs)
 

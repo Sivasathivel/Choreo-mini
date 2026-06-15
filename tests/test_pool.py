@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import pytest
 
-from choreo_mini.core.llm import CustomLLM, Message
-from choreo_mini.core.observability import LLMPoolFallback, LLMPoolRoute
-from choreo_mini.core.pool import LLMCandidate, LLMPool
+from motif_ai.core.llm import CustomLLM, Message
+from motif_ai.core.observability import LLMPoolFallback, LLMPoolRoute
+from motif_ai.core.pool import LLMCandidate, LLMPool
 
 
 # ---------------------------------------------------------------------------
@@ -339,13 +339,13 @@ class TestChatInterface:
 
 class TestPublicExports:
     def test_pool_exported_from_package(self):
-        import choreo_mini
-        assert hasattr(choreo_mini, "LLMPool")
-        assert hasattr(choreo_mini, "LLMCandidate")
-        assert hasattr(choreo_mini, "LLMPoolRoute")
-        assert hasattr(choreo_mini, "LLMPoolFallback")
+        import motif_ai
+        assert hasattr(motif_ai, "LLMPool")
+        assert hasattr(motif_ai, "LLMCandidate")
+        assert hasattr(motif_ai, "LLMPoolRoute")
+        assert hasattr(motif_ai, "LLMPoolFallback")
 
     def test_pool_usable_from_package(self):
-        from choreo_mini import LLMCandidate, LLMPool
+        from motif_ai import LLMCandidate, LLMPool
         pool = LLMPool([LLMCandidate(_llm("hi"), name="m")])
         assert pool.generate("hello") == "hi"

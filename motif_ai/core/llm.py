@@ -22,7 +22,7 @@ import requests
 
 # Observability is imported lazily-ish to avoid a circular import:
 # observability.py does not import llm.py, so this is safe.
-from choreo_mini.core.observability import (
+from motif_ai.core.observability import (
     ObservabilityHook,
     LLMRequestStart,
     LLMRequestEnd,
@@ -38,7 +38,7 @@ class Message:
     ``role`` is one of ``"system"``, ``"user"``, or ``"assistant"``.
     ``tool_call_id`` is populated on tool-result messages to correlate
     the result with the original tool-call request.
-    ``call_id`` is populated by :meth:`~choreo_mini.core.workflow.Workflow.send`
+    ``call_id`` is populated by :meth:`~motif_ai.core.workflow.Workflow.send`
     with the span ID of that call — correlates the response to its
     observability span.
     """

@@ -1,7 +1,7 @@
-"""Multi-agent episode loop for choreo-mini.
+"""Multi-agent episode loop for motif-ai.
 
 An :class:`Episode` orchestrates a round-based MARL game across any number of
-:class:`~choreo_mini.core.workflow.Workflow` subclasses.  Each participating
+:class:`~motif_ai.core.workflow.Workflow` subclasses.  Each participating
 workflow exposes an *action method* — a plain Python callable that receives the
 current environment state and the round index and returns an action string.
 
@@ -19,10 +19,10 @@ Design principles
 Quick-start example::
 
     import copy
-    from choreo_mini.core.episode import Episode, nash_convergence_detector
-    from choreo_mini.core.workflow import Workflow
-    from choreo_mini.core.nodes import AgentNode
-    from choreo_mini.core.llm import CustomLLM
+    from motif_ai.core.episode import Episode, nash_convergence_detector
+    from motif_ai.core.workflow import Workflow
+    from motif_ai.core.nodes import AgentNode
+    from motif_ai.core.llm import CustomLLM
 
     # --- define workflows ---
     class CountryWorkflow(Workflow):
@@ -70,8 +70,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from choreo_mini.core.exceptions import EpisodeError
-from choreo_mini.core.observability import (
+from motif_ai.core.exceptions import EpisodeError
+from motif_ai.core.observability import (
     ObservabilityHook,
     EpisodeStepStart,
     EpisodeStepEnd,
@@ -120,7 +120,7 @@ class Episode:
     agents:
         Mapping of agent name → action callable.  Each callable must have the
         signature ``(env_state: dict, round: int) -> str``.  Typically this
-        is a method on a :class:`~choreo_mini.core.workflow.Workflow` subclass
+        is a method on a :class:`~motif_ai.core.workflow.Workflow` subclass
         (e.g. ``usa_workflow.propose``).
     env:
         The initial environment state.  Any Python value; a shallow copy is

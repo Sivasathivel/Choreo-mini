@@ -1,4 +1,4 @@
-"""Tests for WorkflowMCPServer — MCP server exposure of choreo-mini workflows.
+"""Tests for WorkflowMCPServer — MCP server exposure of motif-ai workflows.
 
 All tests use mocked MCP internals; no real MCP client/server connection is
 required.  The suite verifies:
@@ -18,10 +18,10 @@ from unittest.mock import AsyncMock, MagicMock, patch, call
 
 import pytest
 
-from choreo_mini.core.llm import CustomLLM, Message
-from choreo_mini.core.mcp_server import WorkflowMCPServer
-from choreo_mini.core.nodes import AgentNode
-from choreo_mini.core.workflow import Workflow
+from motif_ai.core.llm import CustomLLM, Message
+from motif_ai.core.mcp_server import WorkflowMCPServer
+from motif_ai.core.nodes import AgentNode
+from motif_ai.core.workflow import Workflow
 
 
 # ---------------------------------------------------------------------------
@@ -248,10 +248,10 @@ class TestDynamicTools:
 
 class TestPackageExport:
     def test_importable_from_top_level(self):
-        import choreo_mini
-        assert hasattr(choreo_mini, "WorkflowMCPServer")
+        import motif_ai
+        assert hasattr(motif_ai, "WorkflowMCPServer")
 
     def test_is_correct_class(self):
-        from choreo_mini import WorkflowMCPServer as Cls
-        from choreo_mini.core.mcp_server import WorkflowMCPServer as Src
+        from motif_ai import WorkflowMCPServer as Cls
+        from motif_ai.core.mcp_server import WorkflowMCPServer as Src
         assert Cls is Src

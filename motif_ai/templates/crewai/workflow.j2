@@ -1,13 +1,12 @@
-"""Generated LangGraph workflow from choreo-mini code."""
+"""Generated CrewAI workflow from motif-ai code."""
 
 import asyncio
 import concurrent.futures
 from typing import Any, Dict, List, TypedDict
 
-from langgraph.constants import END
-from langgraph.graph import StateGraph
+from crewai import Agent, Task, Crew
 
-from choreo_mini.core.workflow import Workflow
+from motif_ai.core.workflow import Workflow
 
 
 NODE_RUNTIME_NAMES = {
@@ -70,8 +69,8 @@ def _run_async(coro):
     """Run an async coroutine from synchronous code.
 
     Handles the case where an event loop is already running (e.g. inside
-    a LangGraph executor or Jupyter notebook) by offloading the coroutine
-    to a fresh thread that owns its own event loop.
+    a Jupyter notebook) by offloading the coroutine to a fresh thread
+    that owns its own event loop.
     """
     try:
         asyncio.get_running_loop()
@@ -81,16 +80,42 @@ def _run_async(coro):
         return asyncio.run(coro)
 
 
-class WorkflowState(TypedDict, total=False):
+{% for node in agent_nodes %}
+{{ node.var_name }} = Agent(
+    role={{ node.kwargs.get('role', "'Agent'") }},
+    goal={{ node.kwargs.get('goal', '"Execute assigned workflow steps"') }},
+    backstory={{ node.kwargs.get('backstory', '"Generated from motif-ai workflow conversion"') }},
+    allow_delegation=False,
+    verbose=True,
+)
+{% endfor %}
+
+
+AGENTS = [
+{% for node in agent_nodes %}
+    {{ node.var_name }},
+{% endfor %}
+]
+
+
+AGENT_REGISTRY = {
+{% for node in agent_nodes %}
+    str({{ node.runtime_name_expr }}): {{ node.var_name }},
+    "{{ node.var_name }}": {{ node.var_name }},
+{% endfor %}
+}
+
+
+class CrewWorkflowState(TypedDict, total=False):
     wf: Any
+    input_queue: List[Any]
     input: Any
     continue_loop: bool
     loop_budget: int
     locals: Dict[str, Any]
     frames: List[Dict[str, Any]]
-    pending_call: Dict[str, Any]
-    pending_node: str
     messages: List[Dict[str, Any]]
+    tasks: List[Task]
     last_response: str
     last_agent: str
     wf_state: Dict[str, Any]
@@ -98,12 +123,11 @@ class WorkflowState(TypedDict, total=False):
     done: bool
 
 
-def _require_workflow(state: WorkflowState) -> Workflow:
+def _require_workflow(state: CrewWorkflowState) -> Workflow:
     wf = state.get("wf")
     if not isinstance(wf, Workflow):
         raise ValueError(
-            "Workflow instance missing from state. "
-            "Invoke app with {'wf': workflow, 'input': '...'}"
+            "Workflow instance missing. Call kickoff(wf=workflow, inputs={...})"
         )
     return wf
 
@@ -123,24 +147,38 @@ def _serialize_agent_states(wf: Workflow) -> Dict[str, Dict[str, Any]]:
     return serialized
 
 
-def _resolve_input(state: WorkflowState) -> Any:
-    raw_input = state.get("input")
-    if raw_input is not None:
-        return raw_input
+def _normalize_input_queue(inputs: Any) -> List[Any]:
+    if inputs is None:
+        return []
+    if isinstance(inputs, dict):
+        if "input_queue" in inputs:
+            queue = inputs["input_queue"]
+            if isinstance(queue, list):
+                return list(queue)
+            return [queue]
+        if "input" in inputs:
+            return [inputs["input"]]
+        return []
+    if isinstance(inputs, (list, tuple)):
+        return list(inputs)
+    return [inputs]
 
-    messages = state.get("messages", [])
-    if messages:
-        return messages[-1].get("content", "")
+
+def _resolve_input(state: CrewWorkflowState) -> Any:
+    queue = state.setdefault("input_queue", [])
+    if queue:
+        value = queue.pop(0)
+        state["input"] = value
+        return value
+
     return ""
 
 
-def _build_eval_env(state: WorkflowState, extra: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def _build_eval_env(state: CrewWorkflowState, extra: Dict[str, Any] | None = None) -> Dict[str, Any]:
     wf = _require_workflow(state)
     env: Dict[str, Any] = {
         "__builtins__": SAFE_BUILTINS,
         "wf": wf,
-        # 'self' alias lets subclass-pattern expressions like self.send(...) / self.state[...]
-        # resolve correctly in the generated runtime without source transformation.
         "self": wf,
     }
     env.update(state.get("locals", {}))
@@ -149,14 +187,14 @@ def _build_eval_env(state: WorkflowState, extra: Dict[str, Any] | None = None) -
     return env
 
 
-def _eval_expr(expr: str, state: WorkflowState, extra: Dict[str, Any] | None = None) -> Any:
+def _eval_expr(expr: str, state: CrewWorkflowState, extra: Dict[str, Any] | None = None) -> Any:
     env = _build_eval_env(state, extra)
     try:
         return eval(expr, env, {})
     except Exception as exc:
         available = sorted(k for k in env if not k.startswith("_"))
         raise RuntimeError(
-            f"[choreo-mini] eval failed on expression {expr!r}\n"
+            f"[motif-ai] eval failed on expression {expr!r}\n"
             f"  Error      : {type(exc).__name__}: {exc}\n"
             f"  In scope   : {available}\n"
             f"  Hint: if a variable is missing, check that the AST parser captured\n"
@@ -165,17 +203,7 @@ def _eval_expr(expr: str, state: WorkflowState, extra: Dict[str, Any] | None = N
 
 
 def _bare_node_name(func_name: str) -> str:
-    """Return the bare node variable name from a dotted func name.
-
-    Strips the leading object qualifier (e.g. 'self.' for subclass-pattern code
-    or 'wf.' for flat-pattern code) so that the result matches the keys in
-    NODE_TYPES and NODE_RUNTIME_NAMES.
-
-    Examples:
-        'self.ticket_loader.execute' -> 'ticket_loader'
-        'ticket_loader.execute'      -> 'ticket_loader'
-        'self.send'                  -> 'self'  (won't hit this path)
-    """
+    """Strip leading 'self.' or 'wf.' qualifier so the result matches NODE_TYPES keys."""
     base = func_name.rsplit(".", 1)[0]
     for prefix in ("self.", "wf."):
         if base.startswith(prefix):
@@ -183,7 +211,7 @@ def _bare_node_name(func_name: str) -> str:
     return base
 
 
-def _sync_locals_from_env(state: WorkflowState, env: Dict[str, Any]) -> None:
+def _sync_locals_from_env(state: CrewWorkflowState, env: Dict[str, Any]) -> None:
     reserved = {"__builtins__", "wf", "__value__"}
     locals_state = state.setdefault("locals", {})
     for key, value in env.items():
@@ -191,7 +219,7 @@ def _sync_locals_from_env(state: WorkflowState, env: Dict[str, Any]) -> None:
             locals_state[key] = value
 
 
-def _assign_target(state: WorkflowState, target_expr: str, value: Any) -> None:
+def _assign_target(state: CrewWorkflowState, target_expr: str, value: Any) -> None:
     if target_expr.isidentifier():
         state.setdefault("locals", {})[target_expr] = value
         return
@@ -201,7 +229,7 @@ def _assign_target(state: WorkflowState, target_expr: str, value: Any) -> None:
     _sync_locals_from_env(state, env)
 
 
-def _apply_augassign(state: WorkflowState, target_expr: str, op_name: str, value: Any) -> None:
+def _apply_augassign(state: CrewWorkflowState, target_expr: str, op_name: str, value: Any) -> None:
     operator = AUGASSIGN_OPERATORS.get(op_name)
     if operator is None:
         raise ValueError(f"Unsupported augmented assignment operator: {op_name}")
@@ -227,7 +255,7 @@ def _apply_accessor(result: Any, accessor: List[Dict[str, str]]) -> Any:
     return current
 
 
-def _assign_call_result(state: WorkflowState, stmt: Dict[str, Any], result: Any) -> Any:
+def _assign_call_result(state: CrewWorkflowState, stmt: Dict[str, Any], result: Any) -> Any:
     transformed = result
     accessor = stmt.get("result_accessor", [])
     if accessor:
@@ -243,7 +271,7 @@ def _assign_call_result(state: WorkflowState, stmt: Dict[str, Any], result: Any)
     return transformed
 
 
-def _push_block(state: WorkflowState, statements: List[Dict[str, Any]]) -> None:
+def _push_block(state: CrewWorkflowState, statements: List[Dict[str, Any]]) -> None:
     if not statements:
         return
     state.setdefault("frames", []).append({
@@ -253,7 +281,7 @@ def _push_block(state: WorkflowState, statements: List[Dict[str, Any]]) -> None:
     })
 
 
-def _break_loop(state: WorkflowState) -> None:
+def _break_loop(state: CrewWorkflowState) -> None:
     frames = state.setdefault("frames", [])
     while frames:
         frame = frames.pop()
@@ -262,13 +290,13 @@ def _break_loop(state: WorkflowState) -> None:
     state["done"] = True
 
 
-def _continue_loop(state: WorkflowState) -> None:
+def _continue_loop(state: CrewWorkflowState) -> None:
     frames = state.setdefault("frames", [])
     while frames and frames[-1].get("kind") == "block":
         frames.pop()
 
 
-def _push_for_frame(state: WorkflowState, stmt: Dict[str, Any]) -> None:
+def _push_for_frame(state: CrewWorkflowState, stmt: Dict[str, Any]) -> None:
     iterable = list(_eval_expr(stmt["iter_expr"], state))
     state.setdefault("frames", []).append({
         "kind": "for",
@@ -280,7 +308,7 @@ def _push_for_frame(state: WorkflowState, stmt: Dict[str, Any]) -> None:
     })
 
 
-def _push_while_frame(state: WorkflowState, stmt: Dict[str, Any]) -> None:
+def _push_while_frame(state: CrewWorkflowState, stmt: Dict[str, Any]) -> None:
     loop_budget = state.get("loop_budget")
     if loop_budget is None:
         loop_budget = 2 if state.get("continue_loop") else 1
@@ -296,19 +324,107 @@ def _push_while_frame(state: WorkflowState, stmt: Dict[str, Any]) -> None:
     })
 
 
-def _route_dispatch(state: WorkflowState) -> str:
-    return state.get("pending_node", "stop")
+def _resolve_task_agent(agent_name: str):
+    key = str(agent_name).strip().strip("\"'")
+    return AGENT_REGISTRY.get(key) or AGENT_REGISTRY.get(key.lower())
 
 
-def dispatch_node(state: WorkflowState) -> WorkflowState:
+def _record_task(state: CrewWorkflowState, description: str, agent_name: str, expected_output: str) -> None:
+    agent = _resolve_task_agent(agent_name)
+    if agent is None:
+        return
+
+    state.setdefault("tasks", []).append(
+        Task(
+            description=description,
+            agent=agent,
+            expected_output=expected_output,
+        )
+    )
+
+
+def _execute_send(state: CrewWorkflowState, stmt: Dict[str, Any]) -> None:
+    wf = _require_workflow(state)
+    call = stmt["call"]
+    func_name = call["func"]
+
+    if func_name.endswith(".send"):
+        agent_name = str(_eval_expr(call["args"][0], state))
+        user_input = _eval_expr(call["args"][1], state) if len(call["args"]) > 1 else _resolve_input(state)
+        # Use async path for agents with a toolset so the tool-use loop runs
+        agent_var = next(
+            (k for k, v in NODE_RUNTIME_NAMES.items() if str(v) == agent_name),
+            None,
+        )
+        if agent_var and AGENT_TOOLSETS.get(agent_var):
+            response = _run_async(wf.send_async(agent_name, str(user_input)))
+        else:
+            response = wf.send(agent_name, str(user_input))
+        assigned_value = _assign_call_result(state, stmt, response)
+        response_text = getattr(response, "content", str(assigned_value))
+        _record_task(
+            state,
+            description=f"Workflow send to {agent_name}: {user_input}",
+            agent_name=agent_name,
+            expected_output=response_text,
+        )
+        message_agent = agent_name
+    else:
+        base_name = _bare_node_name(func_name)
+        runtime_name = str(NODE_RUNTIME_NAMES[base_name])
+        agent_state = wf.agent_states[runtime_name]
+        context_value = _eval_expr(call["args"][0], state) if call["args"] else _resolve_input(state)
+        if AGENT_TOOLSETS.get(base_name):
+            response = _run_async(agent_state.agent.execute_async(context=context_value))
+        else:
+            response = agent_state.agent.execute(context=context_value)
+        assigned_value = _assign_call_result(state, stmt, response)
+        response_text = getattr(response, "content", str(assigned_value))
+        _record_task(
+            state,
+            description=f"Workflow execute via {runtime_name}: {context_value}",
+            agent_name=runtime_name,
+            expected_output=response_text,
+        )
+        message_agent = runtime_name
+
+    state.setdefault("messages", []).append({
+        "role": "assistant",
+        "agent": message_agent,
+        "content": response_text,
+    })
+    state["last_agent"] = message_agent
+    state["last_response"] = response_text
+    state["wf_state"] = dict(wf.state)
+    state["agent_states"] = _serialize_agent_states(wf)
+
+
+def _execute_service(state: CrewWorkflowState, stmt: Dict[str, Any]) -> None:
+    wf = _require_workflow(state)
+    call = stmt["call"]
+    base_name = _bare_node_name(call["func"])
+    runtime_name = str(NODE_RUNTIME_NAMES[base_name])
+    service = wf.nodes[runtime_name]
+
+    args = [_eval_expr(arg, state) for arg in call.get("args", [])]
+    kwargs = {key: _eval_expr(value, state) for key, value in call.get("kwargs", {}).items()}
+    result = service.execute(*args, **kwargs)
+
+    assigned_value = _assign_call_result(state, stmt, result)
+    state["last_response"] = str(assigned_value)
+    state["wf_state"] = dict(wf.state)
+    state["agent_states"] = _serialize_agent_states(wf)
+
+
+def _run_dispatch(state: CrewWorkflowState) -> CrewWorkflowState:
     wf = _require_workflow(state)
     state.setdefault("locals", {})
     state.setdefault("messages", [])
     state.setdefault("frames", [])
+    state.setdefault("tasks", [])
 
     if not state["frames"] and not state.get("done"):
         {% if primary_method_arg %}
-        # Subclass pattern: bind the primary method's first argument from the input queue.
         state.setdefault("locals", {})["{{ primary_method_arg }}"] = _resolve_input(state)
         {% endif %}
         _push_block(state, EXECUTION_LOGIC)
@@ -317,7 +433,6 @@ def dispatch_node(state: WorkflowState) -> WorkflowState:
         frames = state["frames"]
         if not frames:
             state["done"] = True
-            state["pending_node"] = "stop"
             state["wf_state"] = dict(wf.state)
             state["agent_states"] = _serialize_agent_states(wf)
             return state
@@ -341,19 +456,17 @@ def dispatch_node(state: WorkflowState) -> WorkflowState:
                     continue
 
                 if func_name.endswith(".send"):
-                    state["pending_call"] = stmt
-                    state["pending_node"] = "send_call"
-                    return state
+                    _execute_send(state, stmt)
+                    continue
 
                 if func_name.endswith(".execute"):
-                    state["pending_call"] = stmt
                     base_name = _bare_node_name(func_name)
                     node_type = NODE_TYPES.get(base_name)
                     if node_type == "AgentNode":
-                        state["pending_node"] = "send_call"
+                        _execute_send(state, stmt)
                     else:
-                        state["pending_node"] = "service_call"
-                    return state
+                        _execute_service(state, stmt)
+                    continue
 
             elif stmt_type == "assign":
                 _assign_target(state, stmt["target_expr"], _eval_expr(stmt["expr"], state))
@@ -385,15 +498,15 @@ def dispatch_node(state: WorkflowState) -> WorkflowState:
                 continue
 
         elif kind == "for":
-            if frame["index"] < len(frame["items"]):
-                item = frame["items"][frame["index"]]
-                frame["index"] += 1
-                _assign_target(state, frame["iter_var"], item)
-                _push_block(state, frame.get("body", []))
+            if frame["index"] >= len(frame["items"]):
+                frames.pop()
+                _push_block(state, frame.get("orelse", []))
                 continue
 
-            frames.pop()
-            _push_block(state, frame.get("orelse", []))
+            item = frame["items"][frame["index"]]
+            frame["index"] += 1
+            _assign_target(state, frame["iter_var"], item)
+            _push_block(state, frame.get("body", []))
             continue
 
         elif kind == "while":
@@ -416,100 +529,52 @@ def dispatch_node(state: WorkflowState) -> WorkflowState:
             continue
 
 
-def send_call_node(state: WorkflowState) -> WorkflowState:
-    wf = _require_workflow(state)
-    stmt = state.pop("pending_call")
-    call = stmt["call"]
-    func_name = call["func"]
-
-    if func_name.endswith(".send"):
-        agent_name = _eval_expr(call["args"][0], state)
-        user_input = _eval_expr(call["args"][1], state) if len(call["args"]) > 1 else _resolve_input(state)
-        # Use async path for agents with a toolset so the tool-use loop runs
-        agent_var = next(
-            (k for k, v in NODE_RUNTIME_NAMES.items() if str(v) == str(agent_name)),
-            None,
-        )
-        if agent_var and AGENT_TOOLSETS.get(agent_var):
-            response = _run_async(wf.send_async(str(agent_name), str(user_input)))
-        else:
-            response = wf.send(str(agent_name), str(user_input))
-        message_agent = str(agent_name)
-    else:
-        base_name = _bare_node_name(func_name)
-        runtime_name = NODE_RUNTIME_NAMES[base_name]
-        agent_state = wf.agent_states[str(runtime_name)]
-        context_value = _eval_expr(call["args"][0], state) if call["args"] else _resolve_input(state)
-        if AGENT_TOOLSETS.get(base_name):
-            response = _run_async(agent_state.agent.execute_async(context=context_value))
-        else:
-            response = agent_state.agent.execute(context=context_value)
-        message_agent = str(runtime_name)
-
-    assigned_value = _assign_call_result(state, stmt, response)
-    state.setdefault("messages", []).append({
-        "role": "assistant",
-        "agent": message_agent,
-        "content": getattr(response, "content", str(assigned_value)),
-    })
-    state["last_agent"] = state["messages"][-1]["agent"]
-    state["last_response"] = getattr(response, "content", str(assigned_value))
-    state["wf_state"] = dict(wf.state)
-    state["agent_states"] = _serialize_agent_states(wf)
-    state["pending_node"] = "dispatch"
-    return state
-
-
-def service_call_node(state: WorkflowState) -> WorkflowState:
-    wf = _require_workflow(state)
-    stmt = state.pop("pending_call")
-    call = stmt["call"]
-    base_name = _bare_node_name(call["func"])
-    runtime_name = NODE_RUNTIME_NAMES[base_name]
-    service = wf.nodes[str(runtime_name)]
-
-    args = [_eval_expr(arg, state) for arg in call.get("args", [])]
-    kwargs = {key: _eval_expr(value, state) for key, value in call.get("kwargs", {}).items()}
-    result = service.execute(*args, **kwargs)
-
-    assigned_value = _assign_call_result(state, stmt, result)
-    state["last_response"] = str(assigned_value)
-    state["wf_state"] = dict(wf.state)
-    state["agent_states"] = _serialize_agent_states(wf)
-    state["pending_node"] = "dispatch"
-    return state
-
-
-def build_app():
-    graph = StateGraph(WorkflowState)
-
-    graph.add_node("dispatch", dispatch_node)
-    graph.add_node("send_call", send_call_node)
-    graph.add_node("service_call", service_call_node)
-
-    graph.set_entry_point("dispatch")
-
-    graph.add_conditional_edges(
-        "dispatch",
-        _route_dispatch,
-        {
-            "dispatch": "dispatch",
-            "send_call": "send_call",
-            "service_call": "service_call",
-            "stop": END,
-        },
+def _build_crew(tasks: List[Task]) -> Crew:
+    return Crew(
+        agents=AGENTS,
+        tasks=tasks,
+        verbose=True,
     )
 
-    graph.add_edge("send_call", "dispatch")
-    graph.add_edge("service_call", "dispatch")
 
-    return graph.compile()
+def kickoff(
+    inputs: Dict[str, Any] | None = None,
+    *,
+    wf: Workflow | None = None,
+    continue_loop: bool = False,
+    loop_budget: int | None = None,
+) -> Dict[str, Any]:
+    runtime_inputs = inputs or {}
+    workflow = wf or runtime_inputs.get("wf")
+    state: CrewWorkflowState = {
+        "wf": workflow,
+        "input_queue": _normalize_input_queue(runtime_inputs),
+        "continue_loop": continue_loop,
+        "messages": list(runtime_inputs.get("messages", [])),
+    }
+    if loop_budget is not None:
+        state["loop_budget"] = loop_budget
 
+    final_state = _run_dispatch(state)
+    crew_instance = _build_crew(final_state.get("tasks", []))
 
-app = build_app()
+    return {
+        "crew": crew_instance,
+        "tasks": final_state.get("tasks", []),
+        "messages": final_state.get("messages", []),
+        "last_response": final_state.get("last_response", ""),
+        "last_agent": final_state.get("last_agent", ""),
+        "wf_state": final_state.get("wf_state", {}),
+        "agent_states": final_state.get("agent_states", {}),
+        "locals": final_state.get("locals", {}),
+    }
 
 
 if __name__ == "__main__":
-    print("Generated LangGraph app is ready.")
-    print("Invoke with state like: {'wf': workflow, 'input': 'hello', 'messages': [], 'loop_budget': 1}")
-    print("Set loop_budget > 1 to revisit loop bodies; continue_loop=True remains as compatibility shorthand.")
+    print(
+        "Import this module and call kickoff(wf=workflow, inputs={'input': '...'}) "
+        "with a configured motif-ai Workflow instance."
+    )
+    {% if enable_profiling %}
+    print("Profiling data is returned in the kickoff(...) result.")
+    {% endif %}

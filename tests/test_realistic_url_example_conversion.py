@@ -5,8 +5,8 @@ from pathlib import Path
 
 import jinja2
 
-from choreo_mini.cli import _build_render_data
-from choreo_mini.core.ast_parser import parse_workflow_code
+from motif_ai.cli import _build_render_data
+from motif_ai.core.ast_parser import parse_workflow_code
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -71,7 +71,7 @@ def _render_backend(backend: str, output_name: str) -> Path:
     render_data = _build_render_data(workflow_data, backend)
 
     env = jinja2.Environment(
-        loader=jinja2.FileSystemLoader(ROOT / "choreo_mini" / "templates" / backend)
+        loader=jinja2.FileSystemLoader(ROOT / "motif_ai" / "templates" / backend)
     )
     template = env.get_template("workflow.j2")
     output_path = ROOT / "output" / output_name

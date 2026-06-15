@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Choreo-Mini are documented here.
+All notable changes to MotifAI are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
@@ -72,7 +72,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - Initial `Workflow`, `AgentNode`, `ServiceNode` primitives
 - LangGraph, CrewAI, and AutoGen Jinja2 templates
-- CLI (`choreo_mini -f FILE -b BACKEND -o OUTPUT`)
+- CLI (`motif_ai -f FILE -b BACKEND -o OUTPUT`)
 - AST parser (`parse_workflow_code`) — flat/functional pattern
 - Basic tool use loop in `AgentNode`
 - Ethical-use policy files (`PROHIBITED_USES.md`, `EXCLUDED_ENTITIES.md`)

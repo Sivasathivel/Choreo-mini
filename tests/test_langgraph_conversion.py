@@ -1,9 +1,9 @@
 """LangGraph conversion tests — subclass pattern.
 
-The subclass pattern is the correct way to use the choreo-mini converter:
+The subclass pattern is the correct way to use the motif-ai converter:
 each ``class X(Workflow)`` becomes one LangGraph StateGraph.  The flat /
 functional pattern (``wf = Workflow(...)`` inside ``main()``) is for running
-choreo-mini workflows directly; it is NOT a valid conversion target.
+motif-ai workflows directly; it is NOT a valid conversion target.
 """
 
 import importlib.util
@@ -11,11 +11,11 @@ from pathlib import Path
 
 import jinja2
 
-from choreo_mini.core.ast_parser import parse_workflow_code
+from motif_ai.core.ast_parser import parse_workflow_code
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TEMPLATE_DIR = ROOT / "choreo_mini" / "templates" / "langgraph"
+TEMPLATE_DIR = ROOT / "motif_ai" / "templates" / "langgraph"
 
 
 # ---------------------------------------------------------------------------

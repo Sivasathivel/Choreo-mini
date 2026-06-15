@@ -1,7 +1,7 @@
-"""Epistemic belief state for choreo-mini agents and workflows.
+"""Epistemic belief state for motif-ai agents and workflows.
 
 Unlike LangGraph, CrewAI, and AutoGen — which model agent state purely as
-conversation history — choreo-mini gives every agent and every workflow a
+conversation history — motif-ai gives every agent and every workflow a
 structured *belief state*: a confidence-weighted map of what the agent
 believes about the world and about the other agents it interacts with.
 
@@ -15,7 +15,7 @@ This is the foundation for genuine multi-agent reasoning:
   :meth:`BeliefState.decay` reduces confidence uniformly, forcing agents to
   re-observe rather than rely on outdated information.
 
-Typical usage inside a :class:`~choreo_mini.core.workflow.Workflow` subclass::
+Typical usage inside a :class:`~motif_ai.core.workflow.Workflow` subclass::
 
     # record an observation about the environment
     self.beliefs.observe("tariff_rate", 0.15, confidence=0.9)

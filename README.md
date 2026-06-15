@@ -1,17 +1,17 @@
-# Choreo-Mini
+# MotifAI
 
-[![CI](https://github.com/Sivasathivel/Choreo-mini/actions/workflows/ci.yml/badge.svg)](https://github.com/Sivasathivel/Choreo-mini/actions/workflows/ci.yml)
-[![PyPI version](https://img.shields.io/pypi/v/choreo-mini)](https://pypi.org/project/choreo-mini/)
-[![Python versions](https://img.shields.io/pypi/pyversions/choreo-mini)](https://pypi.org/project/choreo-mini/)
+[![CI](https://github.com/Sivasathivel/MotifAI/actions/workflows/ci.yml/badge.svg)](https://github.com/Sivasathivel/MotifAI/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/motif-ai)](https://pypi.org/project/motif-ai/)
+[![Python versions](https://img.shields.io/pypi/pyversions/motif-ai)](https://pypi.org/project/motif-ai/)
 [![License](https://img.shields.io/badge/license-Choreo--Mini--1.2-blue)](LICENSE)
 
 **Lightweight Python framework for multi-agent LLM workflows** — MARL episode loop, cost-aware LLM pool routing, OTEL observability, and optional compile-to-any-runtime.
 
 ---
 
-## What Choreo-Mini does that others don't
+## What MotifAI does that others don't
 
-| Feature | LangGraph | CrewAI | AutoGen | **Choreo-Mini** |
+| Feature | LangGraph | CrewAI | AutoGen | **MotifAI** |
 |---------|-----------|--------|---------|-----------------|
 | Write once, compile to any runtime | ✗ | ✗ | ✗ | ✓ |
 | Epistemic belief state per agent | ✗ | ✗ | ✗ | ✓ |
@@ -28,7 +28,7 @@
 Three AI agents — USA, Canada, Mexico — negotiate a trade agreement in real time. Each country runs its own `Workflow`, calls a real LLM, and signals when it has achieved its goals. The episode ends asymmetrically: **USA stops when it has secured the lion's share; Canada and Mexico stop when core interests are protected OR trade diversification makes further concessions irrelevant.**
 
 ```bash
-pip install choreo-mini openai
+pip install motif-ai openai
 export OPENAI_API_KEY=sk-...
 python examples/cusma_negotiation.py
 ```
@@ -38,7 +38,7 @@ Sample terminal output (3 rounds, live):
 ```
 ╔══════════════════════════════════════════════════════════════════════╗
 ║           CUSMA / USMCA  —  Multi-Agent Trade Negotiation            ║
-║    Powered by choreo-mini  ·  Multi-Agent Reinforcement Learning     ║
+║    Powered by motif-ai  ·  Multi-Agent Reinforcement Learning     ║
 ╚══════════════════════════════════════════════════════════════════════╝
 
 ── Round 1 of 8 ──────────────────────────────────────────────────────
@@ -80,16 +80,16 @@ Each party stops for a **different reason**. No Nash equilibrium required.
 ## Installation
 
 ```bash
-pip install choreo-mini
+pip install motif-ai
 ```
 
 Optional extras:
 
 ```bash
-pip install "choreo-mini[otel]"      # OpenTelemetry export
-pip install "choreo-mini[langgraph]" # compile to LangGraph
-pip install "choreo-mini[crewai]"    # compile to CrewAI
-pip install "choreo-mini[autogen]"   # compile to AutoGen
+pip install "motif-ai[otel]"      # OpenTelemetry export
+pip install "motif-ai[langgraph]" # compile to LangGraph
+pip install "motif-ai[crewai]"    # compile to CrewAI
+pip install "motif-ai[autogen]"   # compile to AutoGen
 ```
 
 ---
@@ -101,7 +101,7 @@ pip install "choreo-mini[autogen]"   # compile to AutoGen
 Define agents as instance attributes. No manual state wiring:
 
 ```python
-from choreo_mini import Workflow, AgentNode, LLM
+from motif_ai import Workflow, AgentNode, LLM
 
 class TradingAdvisor(Workflow):
     def __init__(self, llm):
@@ -117,7 +117,7 @@ class TradingAdvisor(Workflow):
 ### Any OpenAI-compatible endpoint
 
 ```python
-from choreo_mini import LLM, CustomLLM
+from motif_ai import LLM, CustomLLM
 
 # OpenAI
 llm = LLM(api_key="sk-...", endpoint="https://api.openai.com", model="gpt-4o")
@@ -162,7 +162,7 @@ print(wf.beliefs.snapshot())
 Run multi-party experiments where agents observe each other's actions, receive rewards, and update their proposals each round:
 
 ```python
-from choreo_mini import Episode, max_rounds_terminator
+from motif_ai import Episode, max_rounds_terminator
 
 def huf_reward(agent_id, action, env, step, trajectory):
     """Your Human Utility Function — score each party's outcome."""
@@ -189,7 +189,7 @@ The episode records every round's env snapshot, agent actions, and rewards — r
 `LLMPool` is a drop-in replacement for `llm=` on any `AgentNode`. It routes across multiple backends according to a policy and falls back transparently on failure:
 
 ```python
-from choreo_mini import LLMPool, LLMCandidate
+from motif_ai import LLMPool, LLMCandidate
 
 pool = LLMPool(
     candidates=[
@@ -226,7 +226,7 @@ for s in pool.stats:
 Every framework boundary emits a typed event. Pass a hook to any workflow, episode, or pool:
 
 ```python
-from choreo_mini import StdoutHook, JsonFileHook, CompositeHook, OTLPHook
+from motif_ai import StdoutHook, JsonFileHook, CompositeHook, OTLPHook
 
 hook = CompositeHook(
     StdoutHook(color=True),                      # coloured terminal output
@@ -279,10 +279,10 @@ print(json.dumps(wf.dump(), indent=2))
 
 ## Structured exceptions
 
-Choreo-Mini raises typed exceptions so you can handle failures precisely:
+MotifAI raises typed exceptions so you can handle failures precisely:
 
 ```python
-from choreo_mini import (
+from motif_ai import (
     AgentNotFoundError,   # wf.send() called with an unregistered agent name
     AgentRegistrationError,  # duplicate agent added to a workflow
     EpisodeError,         # episode misuse (step after done, etc.)
@@ -298,9 +298,9 @@ from choreo_mini import (
 When you're ready to migrate, compile your `Workflow` subclass with the CLI:
 
 ```bash
-choreo_mini -f examples/my_workflow.py -b langgraph -o output/graph.py
-choreo_mini -f examples/my_workflow.py -b crewai    -o output/crewai_crew.py
-choreo_mini -f examples/my_workflow.py -b autogen   -o output/autogen_agents.py
+motif_ai -f examples/my_workflow.py -b langgraph -o output/graph.py
+motif_ai -f examples/my_workflow.py -b crewai    -o output/crewai_crew.py
+motif_ai -f examples/my_workflow.py -b autogen   -o output/autogen_agents.py
 ```
 
 Only the **subclass pattern** is a valid compilation target:
@@ -324,7 +324,7 @@ A flat `wf = Workflow(...)` inside `main()` runs fine but cannot be compiled —
 ## MCP server — expose your workflow to any MCP client
 
 ```python
-from choreo_mini import WorkflowMCPServer
+from motif_ai import WorkflowMCPServer
 
 server = WorkflowMCPServer(my_workflow)
 server.serve_sse()    # HTTP SSE for network clients
@@ -344,8 +344,8 @@ What gets registered automatically:
 ## Quick-start from source
 
 ```bash
-git clone https://github.com/Sivasathivel/Choreo-mini
-cd choreo-mini
+git clone https://github.com/Sivasathivel/MotifAI
+cd motif-ai
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest          # 272 tests, all green
@@ -400,16 +400,16 @@ python examples/llm_pool_scheduling.py
 
 ## License
 
-This project is released under the [Choreo-Mini Source License](LICENSE).
+This project is released under the [MotifAI Source License](LICENSE).
 
 **Allowed:**
 - Use as a library or dependency in any project, including commercial applications
 - Modify and contribute back
-- Keep your larger application closed-source when it only depends on choreo-mini
+- Keep your larger application closed-source when it only depends on motif-ai
 
 **Not allowed:**
-- Building and selling a product or SaaS where choreo-mini is the core value being offered
+- Building and selling a product or SaaS where motif-ai is the core value being offered
 - Distributing a modified derivative without releasing the derivative source under the same license
-- Selling paid access to choreo-mini or a derivative API/service
+- Selling paid access to motif-ai or a derivative API/service
 
 Citation is required in public materials. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution terms.

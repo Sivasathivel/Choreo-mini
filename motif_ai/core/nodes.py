@@ -1,6 +1,6 @@
-"""Node types for choreo-mini workflows.
+"""Node types for motif-ai workflows.
 
-Nodes are the building blocks of a :class:`~choreo_mini.core.workflow.Workflow`.
+Nodes are the building blocks of a :class:`~motif_ai.core.workflow.Workflow`.
 Each node registers itself with the workflow on construction and can be
 addressed by name at runtime.
 
@@ -15,8 +15,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from choreo_mini.core.llm import LLM, Message, ToolCallMessage, ToolSchema
-from choreo_mini.core.tool_clients import BaseToolClient, create_tool_client
+from motif_ai.core.llm import LLM, Message, ToolCallMessage, ToolSchema
+from motif_ai.core.tool_clients import BaseToolClient, create_tool_client
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +65,7 @@ class AgentNode(BaseNode):
     Parameters
     ----------
     workflow:
-        The owning :class:`~choreo_mini.core.workflow.Workflow`; the agent
+        The owning :class:`~motif_ai.core.workflow.Workflow`; the agent
         registers itself on construction.  Pass ``None`` for standalone use.
     name:
         Unique identifier within the workflow.
@@ -84,11 +84,11 @@ class AgentNode(BaseNode):
     properties:
         Arbitrary key/value metadata forwarded to the graph layer.
     llm:
-        :class:`~choreo_mini.core.llm.LLM` (or :class:`~choreo_mini.core.llm.CustomLLM`)
+        :class:`~motif_ai.core.llm.LLM` (or :class:`~motif_ai.core.llm.CustomLLM`)
         instance used to generate responses.
     toolset:
         List of tool-server config dicts.  Each dict is passed to
-        :func:`~choreo_mini.core.tool_clients.create_tool_client`; see that
+        :func:`~motif_ai.core.tool_clients.create_tool_client`; see that
         function for the expected schema.
     """
 
@@ -216,15 +216,15 @@ class AgentNode(BaseNode):
         """Run the agent synchronously and return the assistant reply.
 
         Conversation history is normally managed by the owning
-        :class:`~choreo_mini.core.workflow.Workflow`; ``context`` is filled
-        automatically when called via :meth:`~choreo_mini.core.workflow.Workflow.send`.
+        :class:`~motif_ai.core.workflow.Workflow`; ``context`` is filled
+        automatically when called via :meth:`~motif_ai.core.workflow.Workflow.send`.
         Pass ``context`` manually only when invoking the agent standalone.
 
         Parameters
         ----------
         context:
             Either a plain string (appended as a user message) or a list of
-            :class:`~choreo_mini.core.llm.Message` objects representing the
+            :class:`~motif_ai.core.llm.Message` objects representing the
             full conversation history so far.
         **kwargs:
             Forwarded to the underlying LLM (e.g. ``temperature``, ``max_tokens``).
@@ -253,10 +253,10 @@ class AgentNode(BaseNode):
         When no toolset is configured the behaviour is identical to
         :meth:`execute` but runs inside the event loop.  When a toolset is
         present, tool schemas are fetched, passed to the LLM via
-        :meth:`~choreo_mini.core.llm.LLM.chat_async`, and each
-        :class:`~choreo_mini.core.llm.ToolCallMessage` is resolved by invoking
+        :meth:`~motif_ai.core.llm.LLM.chat_async`, and each
+        :class:`~motif_ai.core.llm.ToolCallMessage` is resolved by invoking
         the matching tool client.  The loop runs until the LLM returns a plain
-        :class:`~choreo_mini.core.llm.Message` or the iteration budget (10) is
+        :class:`~motif_ai.core.llm.Message` or the iteration budget (10) is
         exceeded.
         """
         if self.llm is None:
@@ -306,7 +306,7 @@ class ServiceNode(BaseNode):
     Parameters
     ----------
     workflow:
-        The owning :class:`~choreo_mini.core.workflow.Workflow`.
+        The owning :class:`~motif_ai.core.workflow.Workflow`.
     name:
         Unique identifier within the workflow.
     service_fn:

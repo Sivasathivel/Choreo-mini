@@ -1,4 +1,4 @@
-"""Workflow orchestration for choreo-mini.
+"""Workflow orchestration for motif-ai.
 
 The intended usage pattern is to **subclass** :class:`Workflow` and define
 agents and services as instance attributes inside ``__init__``.  The base
@@ -6,9 +6,9 @@ class handles all state management automatically — conversation history,
 profiling metrics, and epistemic beliefs are available without any extra
 wiring::
 
-    from choreo_mini.core.workflow import Workflow
-    from choreo_mini.core.nodes import AgentNode
-    from choreo_mini.core.llm import CustomLLM
+    from motif_ai.core.workflow import Workflow
+    from motif_ai.core.nodes import AgentNode
+    from motif_ai.core.llm import CustomLLM
 
     class Planner(Workflow):
         def __init__(self):
@@ -23,10 +23,10 @@ wiring::
             result = self.send("Executor", plan.content)
             return result.content
 
-Each :class:`~choreo_mini.core.nodes.AgentNode` created with ``self`` as the
+Each :class:`~motif_ai.core.nodes.AgentNode` created with ``self`` as the
 first argument registers automatically.  The workflow exposes:
 
-* ``self.beliefs`` — a :class:`~choreo_mini.core.belief.BeliefState` shared
+* ``self.beliefs`` — a :class:`~motif_ai.core.belief.BeliefState` shared
   across the entire workflow (environment / world observations).
 * Per-agent belief states accessible via :meth:`get_agent_belief` — each
   agent independently tracks what it believes about the world and other agents.
@@ -40,11 +40,11 @@ import time
 import tracemalloc
 from typing import Any, Dict, List, Optional
 
-from choreo_mini.core.belief import Belief, BeliefState
-from choreo_mini.core.nodes import BaseNode, AgentNode, ServiceNode
-from choreo_mini.core.llm import Message
-from choreo_mini.core.exceptions import AgentNotFoundError, AgentRegistrationError
-from choreo_mini.core.observability import (
+from motif_ai.core.belief import Belief, BeliefState
+from motif_ai.core.nodes import BaseNode, AgentNode, ServiceNode
+from motif_ai.core.llm import Message
+from motif_ai.core.exceptions import AgentNotFoundError, AgentRegistrationError
+from motif_ai.core.observability import (
     ObservabilityHook,
     AgentCallStart,
     AgentCallEnd,
@@ -63,15 +63,15 @@ class AgentState:
     """Runtime state for a single agent managed by a :class:`Workflow`.
 
     Holds the full conversation history, per-call profiling metrics, and an
-    independent :class:`~choreo_mini.core.belief.BeliefState` for this agent.
+    independent :class:`~motif_ai.core.belief.BeliefState` for this agent.
     Users never instantiate this directly — the workflow creates and owns it.
 
     Attributes
     ----------
     agent:
-        The :class:`~choreo_mini.core.nodes.AgentNode` this state belongs to.
+        The :class:`~motif_ai.core.nodes.AgentNode` this state belongs to.
     history:
-        Ordered list of :class:`~choreo_mini.core.llm.Message` objects
+        Ordered list of :class:`~motif_ai.core.llm.Message` objects
         representing the full conversation for this agent.
     call_count:
         Number of times this agent has been invoked.
@@ -80,7 +80,7 @@ class AgentState:
     total_memory:
         Cumulative memory delta across all calls in bytes.
     belief:
-        The agent's private :class:`~choreo_mini.core.belief.BeliefState` —
+        The agent's private :class:`~motif_ai.core.belief.BeliefState` —
         what this agent believes about the world and other agents.
     """
 
@@ -107,10 +107,10 @@ class AgentState:
 # ---------------------------------------------------------------------------
 
 class Workflow:
-    """Base class for all choreo-mini agentic workflows.
+    """Base class for all motif-ai agentic workflows.
 
     Subclass this to define your workflow.  Every
-    :class:`~choreo_mini.core.nodes.AgentNode` constructed with ``self`` as
+    :class:`~motif_ai.core.nodes.AgentNode` constructed with ``self`` as
     its first argument registers automatically — no manual bookkeeping needed.
 
     Parameters
@@ -123,14 +123,14 @@ class Workflow:
 
     Built-in state (available to all subclasses)
     --------------------------------------------
-    ``self.beliefs`` : :class:`~choreo_mini.core.belief.BeliefState`
+    ``self.beliefs`` : :class:`~motif_ai.core.belief.BeliefState`
         Workflow-level shared beliefs — observations about the environment
         that span all agents (e.g. current negotiation terms, round number).
     ``self.state`` : dict
         General-purpose key/value store for workflow-level variables.
     ``self.agent_states`` : dict
         Maps agent name → :class:`AgentState`.  Each entry carries its own
-        :class:`~choreo_mini.core.belief.BeliefState` in addition to history
+        :class:`~motif_ai.core.belief.BeliefState` in addition to history
         and profiling counters.
 
     Example
@@ -213,11 +213,11 @@ class Workflow:
     # ------------------------------------------------------------------
 
     def add_agent(self, agent: AgentNode) -> None:
-        """Register an :class:`~choreo_mini.core.nodes.AgentNode`.
+        """Register an :class:`~motif_ai.core.nodes.AgentNode`.
 
         Called automatically when an ``AgentNode`` is constructed with this
         workflow.  Each agent receives its own :class:`AgentState` (including
-        an independent :class:`~choreo_mini.core.belief.BeliefState`).
+        an independent :class:`~motif_ai.core.belief.BeliefState`).
 
         Raises
         ------
@@ -245,7 +245,7 @@ class Workflow:
         Parameters
         ----------
         agent_name:
-            Name of a registered :class:`~choreo_mini.core.nodes.AgentNode`.
+            Name of a registered :class:`~motif_ai.core.nodes.AgentNode`.
         user_input:
             The user-turn text to send.
         """
@@ -319,7 +319,7 @@ class Workflow:
         """Async variant of :meth:`send` with full tool-use loop support.
 
         Identical to :meth:`send` except that
-        :meth:`~choreo_mini.core.nodes.AgentNode.execute_async` is called,
+        :meth:`~motif_ai.core.nodes.AgentNode.execute_async` is called,
         which resolves tool calls when the agent has a ``toolset`` configured.
         """
         state = self._get_agent_state(agent_name)
@@ -387,7 +387,7 @@ class Workflow:
     # ------------------------------------------------------------------
 
     def get_agent_belief(self, agent_name: str) -> BeliefState:
-        """Return the private :class:`~choreo_mini.core.belief.BeliefState`
+        """Return the private :class:`~motif_ai.core.belief.BeliefState`
         for the named agent.
 
         Use this to read or update what a specific agent believes — distinct

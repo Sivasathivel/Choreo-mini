@@ -1,4 +1,4 @@
-"""Observability and distributed tracing for choreo-mini.
+"""Observability and distributed tracing for motif-ai.
 
 Three layers:
 
@@ -17,12 +17,12 @@ Three layers:
   - :class:`StdoutHook` — coloured, human-readable console output.
   - :class:`JsonFileHook` — newline-delimited JSON (NDJSON) for log pipelines.
   - :class:`OTLPHook` — OpenTelemetry spans via OTLP/gRPC
-    (requires ``pip install choreo-mini[otel]``).
+    (requires ``pip install motif-ai[otel]``).
   - :class:`CompositeHook` — fan-out to multiple hooks simultaneously.
 
 Quick start::
 
-    from choreo_mini.core.observability import StdoutHook, JsonFileHook, CompositeHook
+    from motif_ai.core.observability import StdoutHook, JsonFileHook, CompositeHook
 
     wf = MyWorkflow(observability=StdoutHook())
 
@@ -31,7 +31,7 @@ Quick start::
     wf = MyWorkflow(observability=hook)
 
     # OpenTelemetry (Jaeger, Tempo, Honeycomb, …):
-    from choreo_mini.core.observability import OTLPHook
+    from motif_ai.core.observability import OTLPHook
     wf = MyWorkflow(observability=OTLPHook("my-service", endpoint="http://localhost:4317"))
 """
 
@@ -67,17 +67,17 @@ def new_span_id() -> str:
 
 @dataclass
 class ObservabilityEvent:
-    """Base class for all choreo-mini observability events.
+    """Base class for all motif-ai observability events.
 
     Every event carries:
 
     * ``event_type`` — string discriminator (e.g. ``"agent_call_start"``).
     * ``timestamp`` — Unix time in seconds at the moment of emission.
-    * ``trace_id`` — stable for the lifetime of a :class:`~choreo_mini.core.workflow.Workflow`
+    * ``trace_id`` — stable for the lifetime of a :class:`~motif_ai.core.workflow.Workflow`
       instance; groups all spans belonging to one workflow run.
-    * ``span_id`` — unique per :meth:`~choreo_mini.core.workflow.Workflow.send` call;
-      matches the ``call_id`` on the returned :class:`~choreo_mini.core.llm.Message`.
-    * ``parent_span_id`` — set when a call is nested inside an :class:`~choreo_mini.core.episode.Episode`
+    * ``span_id`` — unique per :meth:`~motif_ai.core.workflow.Workflow.send` call;
+      matches the ``call_id`` on the returned :class:`~motif_ai.core.llm.Message`.
+    * ``parent_span_id`` — set when a call is nested inside an :class:`~motif_ai.core.episode.Episode`
       step, enabling parent-child span relationships in OTEL.
     """
 
@@ -241,7 +241,7 @@ def _safe_emit(hook: Any, event: ObservabilityEvent) -> None:
         hook.on_event(event)
     except Exception:  # noqa: BLE001
         print(
-            f"[choreo-mini] ObservabilityHook.on_event raised an exception "
+            f"[motif-ai] ObservabilityHook.on_event raised an exception "
             f"(event={event.event_type!r}):",
             file=sys.stderr,
         )
@@ -454,7 +454,7 @@ class OTLPHook:
 
     Requires the optional ``otel`` extras::
 
-        pip install choreo-mini[otel]
+        pip install motif-ai[otel]
 
     Usage::
 
@@ -472,7 +472,7 @@ class OTLPHook:
 
     def __init__(
         self,
-        service_name: str = "choreo-mini",
+        service_name: str = "motif-ai",
         endpoint: str = "http://localhost:4317",
     ) -> None:
         try:
@@ -483,7 +483,7 @@ class OTLPHook:
             from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
         except ImportError as exc:
             raise ImportError(
-                "OTLPHook requires the 'otel' extra: pip install 'choreo-mini[otel]'"
+                "OTLPHook requires the 'otel' extra: pip install 'motif-ai[otel]'"
             ) from exc
 
         resource = Resource.create({"service.name": service_name})
@@ -492,7 +492,7 @@ class OTLPHook:
         provider.add_span_processor(BatchSpanProcessor(exporter))
         trace.set_tracer_provider(provider)
 
-        self._tracer = trace.get_tracer("choreo-mini")
+        self._tracer = trace.get_tracer("motif-ai")
         self._trace_mod = trace
         self._open_spans: Dict[str, Any] = {}   # span_id → span + ctx_token
 

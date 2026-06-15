@@ -1,4 +1,4 @@
-"""AST parser for choreo-mini workflow code.
+"""AST parser for motif-ai workflow code.
 
 Analyzes Python code to extract workflow definitions, nodes, and execution
 logic for conversion to other frameworks.
@@ -490,7 +490,7 @@ def _find_workflow_subclasses(tree: ast.Module) -> List[ast.ClassDef]:
 
 
 def parse_workflow_code(code: str, enable_profiling: bool = False) -> Dict[str, Any]:
-    """Parse choreo-mini workflow code and extract components.
+    """Parse motif-ai workflow code and extract components.
 
     Prefers the *subclass pattern* (``class X(Workflow): ...``).
     Falls back to the flat ``main()`` / module-level pattern for legacy code.

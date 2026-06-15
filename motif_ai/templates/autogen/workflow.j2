@@ -1,12 +1,12 @@
-"""Generated CrewAI workflow from choreo-mini code."""
+"""Generated AutoGen workflow from motif-ai code."""
 
 import asyncio
 import concurrent.futures
 from typing import Any, Dict, List, TypedDict
 
-from crewai import Agent, Task, Crew
+from autogen import AssistantAgent, UserProxyAgent
 
-from choreo_mini.core.workflow import Workflow
+from motif_ai.core.workflow import Workflow
 
 
 NODE_RUNTIME_NAMES = {
@@ -81,12 +81,10 @@ def _run_async(coro):
 
 
 {% for node in agent_nodes %}
-{{ node.var_name }} = Agent(
-    role={{ node.kwargs.get('role', "'Agent'") }},
-    goal={{ node.kwargs.get('goal', '"Execute assigned workflow steps"') }},
-    backstory={{ node.kwargs.get('backstory', '"Generated from choreo-mini workflow conversion"') }},
-    allow_delegation=False,
-    verbose=True,
+{{ node.var_name }} = AssistantAgent(
+    name="{{ node.var_name }}",
+    system_message={{ node.kwargs.get('system_prompt', node.kwargs.get('role', "'You are a helpful assistant.'")) }},
+    llm_config=False,
 )
 {% endfor %}
 
@@ -106,7 +104,7 @@ AGENT_REGISTRY = {
 }
 
 
-class CrewWorkflowState(TypedDict, total=False):
+class AutoGenWorkflowState(TypedDict, total=False):
     wf: Any
     input_queue: List[Any]
     input: Any
@@ -115,7 +113,6 @@ class CrewWorkflowState(TypedDict, total=False):
     locals: Dict[str, Any]
     frames: List[Dict[str, Any]]
     messages: List[Dict[str, Any]]
-    tasks: List[Task]
     last_response: str
     last_agent: str
     wf_state: Dict[str, Any]
@@ -123,11 +120,11 @@ class CrewWorkflowState(TypedDict, total=False):
     done: bool
 
 
-def _require_workflow(state: CrewWorkflowState) -> Workflow:
+def _require_workflow(state: AutoGenWorkflowState) -> Workflow:
     wf = state.get("wf")
     if not isinstance(wf, Workflow):
         raise ValueError(
-            "Workflow instance missing. Call kickoff(wf=workflow, inputs={...})"
+            "Workflow instance missing. Call run(wf=workflow, inputs={...})"
         )
     return wf
 
@@ -164,17 +161,16 @@ def _normalize_input_queue(inputs: Any) -> List[Any]:
     return [inputs]
 
 
-def _resolve_input(state: CrewWorkflowState) -> Any:
+def _resolve_input(state: AutoGenWorkflowState) -> Any:
     queue = state.setdefault("input_queue", [])
     if queue:
         value = queue.pop(0)
         state["input"] = value
         return value
-
     return ""
 
 
-def _build_eval_env(state: CrewWorkflowState, extra: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def _build_eval_env(state: AutoGenWorkflowState, extra: Dict[str, Any] | None = None) -> Dict[str, Any]:
     wf = _require_workflow(state)
     env: Dict[str, Any] = {
         "__builtins__": SAFE_BUILTINS,
@@ -187,14 +183,14 @@ def _build_eval_env(state: CrewWorkflowState, extra: Dict[str, Any] | None = Non
     return env
 
 
-def _eval_expr(expr: str, state: CrewWorkflowState, extra: Dict[str, Any] | None = None) -> Any:
+def _eval_expr(expr: str, state: AutoGenWorkflowState, extra: Dict[str, Any] | None = None) -> Any:
     env = _build_eval_env(state, extra)
     try:
         return eval(expr, env, {})
     except Exception as exc:
         available = sorted(k for k in env if not k.startswith("_"))
         raise RuntimeError(
-            f"[choreo-mini] eval failed on expression {expr!r}\n"
+            f"[motif-ai] eval failed on expression {expr!r}\n"
             f"  Error      : {type(exc).__name__}: {exc}\n"
             f"  In scope   : {available}\n"
             f"  Hint: if a variable is missing, check that the AST parser captured\n"
@@ -211,7 +207,7 @@ def _bare_node_name(func_name: str) -> str:
     return base
 
 
-def _sync_locals_from_env(state: CrewWorkflowState, env: Dict[str, Any]) -> None:
+def _sync_locals_from_env(state: AutoGenWorkflowState, env: Dict[str, Any]) -> None:
     reserved = {"__builtins__", "wf", "__value__"}
     locals_state = state.setdefault("locals", {})
     for key, value in env.items():
@@ -219,27 +215,24 @@ def _sync_locals_from_env(state: CrewWorkflowState, env: Dict[str, Any]) -> None
             locals_state[key] = value
 
 
-def _assign_target(state: CrewWorkflowState, target_expr: str, value: Any) -> None:
+def _assign_target(state: AutoGenWorkflowState, target_expr: str, value: Any) -> None:
     if target_expr.isidentifier():
         state.setdefault("locals", {})[target_expr] = value
         return
-
     env = _build_eval_env(state, {"__value__": value})
     exec(f"{target_expr} = __value__", env, env)
     _sync_locals_from_env(state, env)
 
 
-def _apply_augassign(state: CrewWorkflowState, target_expr: str, op_name: str, value: Any) -> None:
+def _apply_augassign(state: AutoGenWorkflowState, target_expr: str, op_name: str, value: Any) -> None:
     operator = AUGASSIGN_OPERATORS.get(op_name)
     if operator is None:
         raise ValueError(f"Unsupported augmented assignment operator: {op_name}")
-
     if target_expr.isidentifier():
         current = state.setdefault("locals", {}).get(target_expr)
         env = _build_eval_env(state, {"__current__": current, "__value__": value})
         state["locals"][target_expr] = eval(f"__current__ {operator} __value__", env, {})
         return
-
     env = _build_eval_env(state, {"__value__": value})
     exec(f"{target_expr} {operator}= __value__", env, env)
     _sync_locals_from_env(state, env)
@@ -255,23 +248,21 @@ def _apply_accessor(result: Any, accessor: List[Dict[str, str]]) -> Any:
     return current
 
 
-def _assign_call_result(state: CrewWorkflowState, stmt: Dict[str, Any], result: Any) -> Any:
+def _assign_call_result(state: AutoGenWorkflowState, stmt: Dict[str, Any], result: Any) -> Any:
     transformed = result
     accessor = stmt.get("result_accessor", [])
     if accessor:
         transformed = _apply_accessor(result, accessor)
-
     assign_to = stmt.get("assign_to")
     assign_target_expr = stmt.get("assign_target_expr")
     if assign_to:
         state.setdefault("locals", {})[assign_to] = transformed
     elif assign_target_expr:
         _assign_target(state, assign_target_expr, transformed)
-
     return transformed
 
 
-def _push_block(state: CrewWorkflowState, statements: List[Dict[str, Any]]) -> None:
+def _push_block(state: AutoGenWorkflowState, statements: List[Dict[str, Any]]) -> None:
     if not statements:
         return
     state.setdefault("frames", []).append({
@@ -281,7 +272,7 @@ def _push_block(state: CrewWorkflowState, statements: List[Dict[str, Any]]) -> N
     })
 
 
-def _break_loop(state: CrewWorkflowState) -> None:
+def _break_loop(state: AutoGenWorkflowState) -> None:
     frames = state.setdefault("frames", [])
     while frames:
         frame = frames.pop()
@@ -290,13 +281,13 @@ def _break_loop(state: CrewWorkflowState) -> None:
     state["done"] = True
 
 
-def _continue_loop(state: CrewWorkflowState) -> None:
+def _continue_loop(state: AutoGenWorkflowState) -> None:
     frames = state.setdefault("frames", [])
     while frames and frames[-1].get("kind") == "block":
         frames.pop()
 
 
-def _push_for_frame(state: CrewWorkflowState, stmt: Dict[str, Any]) -> None:
+def _push_for_frame(state: AutoGenWorkflowState, stmt: Dict[str, Any]) -> None:
     iterable = list(_eval_expr(stmt["iter_expr"], state))
     state.setdefault("frames", []).append({
         "kind": "for",
@@ -308,12 +299,11 @@ def _push_for_frame(state: CrewWorkflowState, stmt: Dict[str, Any]) -> None:
     })
 
 
-def _push_while_frame(state: CrewWorkflowState, stmt: Dict[str, Any]) -> None:
+def _push_while_frame(state: AutoGenWorkflowState, stmt: Dict[str, Any]) -> None:
     loop_budget = state.get("loop_budget")
     if loop_budget is None:
         loop_budget = 2 if state.get("continue_loop") else 1
         state["loop_budget"] = loop_budget
-
     state.setdefault("frames", []).append({
         "kind": "while",
         "infinite": stmt["type"] == "infinite_loop",
@@ -324,26 +314,7 @@ def _push_while_frame(state: CrewWorkflowState, stmt: Dict[str, Any]) -> None:
     })
 
 
-def _resolve_task_agent(agent_name: str):
-    key = str(agent_name).strip().strip("\"'")
-    return AGENT_REGISTRY.get(key) or AGENT_REGISTRY.get(key.lower())
-
-
-def _record_task(state: CrewWorkflowState, description: str, agent_name: str, expected_output: str) -> None:
-    agent = _resolve_task_agent(agent_name)
-    if agent is None:
-        return
-
-    state.setdefault("tasks", []).append(
-        Task(
-            description=description,
-            agent=agent,
-            expected_output=expected_output,
-        )
-    )
-
-
-def _execute_send(state: CrewWorkflowState, stmt: Dict[str, Any]) -> None:
+def _execute_send(state: AutoGenWorkflowState, stmt: Dict[str, Any]) -> None:
     wf = _require_workflow(state)
     call = stmt["call"]
     func_name = call["func"]
@@ -362,12 +333,6 @@ def _execute_send(state: CrewWorkflowState, stmt: Dict[str, Any]) -> None:
             response = wf.send(agent_name, str(user_input))
         assigned_value = _assign_call_result(state, stmt, response)
         response_text = getattr(response, "content", str(assigned_value))
-        _record_task(
-            state,
-            description=f"Workflow send to {agent_name}: {user_input}",
-            agent_name=agent_name,
-            expected_output=response_text,
-        )
         message_agent = agent_name
     else:
         base_name = _bare_node_name(func_name)
@@ -380,12 +345,6 @@ def _execute_send(state: CrewWorkflowState, stmt: Dict[str, Any]) -> None:
             response = agent_state.agent.execute(context=context_value)
         assigned_value = _assign_call_result(state, stmt, response)
         response_text = getattr(response, "content", str(assigned_value))
-        _record_task(
-            state,
-            description=f"Workflow execute via {runtime_name}: {context_value}",
-            agent_name=runtime_name,
-            expected_output=response_text,
-        )
         message_agent = runtime_name
 
     state.setdefault("messages", []).append({
@@ -399,29 +358,26 @@ def _execute_send(state: CrewWorkflowState, stmt: Dict[str, Any]) -> None:
     state["agent_states"] = _serialize_agent_states(wf)
 
 
-def _execute_service(state: CrewWorkflowState, stmt: Dict[str, Any]) -> None:
+def _execute_service(state: AutoGenWorkflowState, stmt: Dict[str, Any]) -> None:
     wf = _require_workflow(state)
     call = stmt["call"]
     base_name = _bare_node_name(call["func"])
     runtime_name = str(NODE_RUNTIME_NAMES[base_name])
     service = wf.nodes[runtime_name]
-
     args = [_eval_expr(arg, state) for arg in call.get("args", [])]
     kwargs = {key: _eval_expr(value, state) for key, value in call.get("kwargs", {}).items()}
     result = service.execute(*args, **kwargs)
-
     assigned_value = _assign_call_result(state, stmt, result)
     state["last_response"] = str(assigned_value)
     state["wf_state"] = dict(wf.state)
     state["agent_states"] = _serialize_agent_states(wf)
 
 
-def _run_dispatch(state: CrewWorkflowState) -> CrewWorkflowState:
+def _run_dispatch(state: AutoGenWorkflowState) -> AutoGenWorkflowState:
     wf = _require_workflow(state)
     state.setdefault("locals", {})
     state.setdefault("messages", [])
     state.setdefault("frames", [])
-    state.setdefault("tasks", [])
 
     if not state["frames"] and not state.get("done"):
         {% if primary_method_arg %}
@@ -454,11 +410,9 @@ def _run_dispatch(state: CrewWorkflowState) -> CrewWorkflowState:
                 if func_name == "input":
                     _assign_call_result(state, stmt, _resolve_input(state))
                     continue
-
                 if func_name.endswith(".send"):
                     _execute_send(state, stmt)
                     continue
-
                 if func_name.endswith(".execute"):
                     base_name = _bare_node_name(func_name)
                     node_type = NODE_TYPES.get(base_name)
@@ -515,7 +469,6 @@ def _run_dispatch(state: CrewWorkflowState) -> CrewWorkflowState:
                     frames.pop()
                     _push_block(state, frame.get("orelse", []))
                     continue
-
                 frame["remaining"] -= 1
                 _push_block(state, frame.get("body", []))
                 continue
@@ -529,14 +482,6 @@ def _run_dispatch(state: CrewWorkflowState) -> CrewWorkflowState:
             continue
 
 
-def _build_crew(tasks: List[Task]) -> Crew:
-    return Crew(
-        agents=AGENTS,
-        tasks=tasks,
-        verbose=True,
-    )
-
-
 def kickoff(
     inputs: Dict[str, Any] | None = None,
     *,
@@ -546,7 +491,7 @@ def kickoff(
 ) -> Dict[str, Any]:
     runtime_inputs = inputs or {}
     workflow = wf or runtime_inputs.get("wf")
-    state: CrewWorkflowState = {
+    state: AutoGenWorkflowState = {
         "wf": workflow,
         "input_queue": _normalize_input_queue(runtime_inputs),
         "continue_loop": continue_loop,
@@ -556,11 +501,7 @@ def kickoff(
         state["loop_budget"] = loop_budget
 
     final_state = _run_dispatch(state)
-    crew_instance = _build_crew(final_state.get("tasks", []))
-
     return {
-        "crew": crew_instance,
-        "tasks": final_state.get("tasks", []),
         "messages": final_state.get("messages", []),
         "last_response": final_state.get("last_response", ""),
         "last_agent": final_state.get("last_agent", ""),
@@ -573,8 +514,9 @@ def kickoff(
 if __name__ == "__main__":
     print(
         "Import this module and call kickoff(wf=workflow, inputs={'input': '...'}) "
-        "with a configured choreo-mini Workflow instance."
+        "with a configured motif-ai Workflow instance."
     )
+
     {% if enable_profiling %}
-    print("Profiling data is returned in the kickoff(...) result.")
+    print("Profiling data is returned in the run(...) result.")
     {% endif %}

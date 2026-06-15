@@ -2,7 +2,7 @@
 
 Runs :class:`CustomerOpsWorkflow` in demo mode (no API key needed) while
 routing every framework event to three sinks simultaneously via
-:class:`~choreo_mini.core.observability.CompositeHook`:
+:class:`~motif_ai.core.observability.CompositeHook`:
 
 1. **StdoutHook** — colour-coded, timestamped live output in the terminal.
 2. **JsonFileHook** — NDJSON trace file (``output/customer_ops_trace.ndjson``).
@@ -41,7 +41,7 @@ project_root = Path(__file__).resolve().parents[1]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from choreo_mini.core.observability import (
+from motif_ai.core.observability import (
     CompositeHook,
     JsonFileHook,
     ObservabilityEvent,

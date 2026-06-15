@@ -1,6 +1,6 @@
 # Excluded Entities Policy
 
-This file is incorporated by reference into the Choreo-Mini Source License.
+This file is incorporated by reference into the MotifAI Source License.
 Entities listed here are excluded from any license grant to use the Software or any Derivative Work.
 
 Last Updated: 2026-03-24

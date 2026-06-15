@@ -1,4 +1,4 @@
-"""Complex smoke test for choreo-mini → backend conversion.
+"""Complex smoke test for motif-ai → backend conversion.
 
 Demonstrates the *subclass pattern*: each ``Workflow`` subclass maps to a
 LangGraph subgraph (or an equivalent unit in CrewAI / AutoGen).
@@ -21,9 +21,9 @@ project_root = Path(__file__).resolve().parents[1]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from choreo_mini.core.llm import CustomLLM
-from choreo_mini.core.nodes import AgentNode, ServiceNode
-from choreo_mini.core.workflow import Workflow
+from motif_ai.core.llm import CustomLLM
+from motif_ai.core.nodes import AgentNode, ServiceNode
+from motif_ai.core.workflow import Workflow
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +69,7 @@ def split_tickets(raw_batch: str):
 class TicketTriageWorkflow(Workflow):
     """Triage support tickets: classify, route to a specialist, then review.
 
-    This class is the unit of conversion: the choreo-mini CLI converts it to a
+    This class is the unit of conversion: the motif-ai CLI converts it to a
     LangGraph StateGraph (or equivalent CrewAI / AutoGen structure) where each
     AgentNode / ServiceNode becomes a graph node and the execution logic of
     ``process_batch`` drives the edges.

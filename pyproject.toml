@@ -3,12 +3,12 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "choreo-mini"
+name = "motif-ai"
 version = "0.3.0"
 description = "Lightweight Python framework for multi-agent LLM workflows — MARL episode loop, LLM pool scheduling, OTEL observability, and compile-to-any-runtime."
 readme = "README.md"
 requires-python = ">=3.10"
-license = "LicenseRef-Choreo-Mini-1.2"
+license = "LicenseRef-MotifAI-1.2"
 license-files = ["LICENSE"]
 authors = [
     { name = "Sivasathivel Kandasamy" },
@@ -40,11 +40,11 @@ dependencies = [
 ]
 
 [project.scripts]
-choreo_mini = "choreo_mini.cli:main"
+motif_ai = "motif_ai.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/Sivasathivel/Choreo-mini"
-Source = "https://github.com/Sivasathivel/Choreo-mini"
+Homepage = "https://github.com/Sivasathivel/MotifAI"
+Source = "https://github.com/Sivasathivel/MotifAI"
 "Author LinkedIn" = "https://www.linkedin.com/in/sivasathivelkandasamy/"
 
 [project.optional-dependencies]
@@ -76,10 +76,10 @@ otel = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["choreo_mini", "choreo_mini.*"]
+include = ["motif_ai", "motif_ai.*"]
 
 [tool.setuptools.package-data]
-"choreo_mini" = ["templates/**/*.j2"]
+"motif_ai" = ["templates/**/*.j2"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

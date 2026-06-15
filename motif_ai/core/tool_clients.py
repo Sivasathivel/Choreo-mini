@@ -1,4 +1,4 @@
-"""External tool/server client implementations for choreo-mini.
+"""External tool/server client implementations for motif-ai.
 
 Each client wraps a specific transport protocol (MCP SSE, MCP Stdio,
 A2A, or plain HTTP) and exposes a uniform async interface::
@@ -46,7 +46,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import base64
 
 if TYPE_CHECKING:
-    from choreo_mini.core.llm import ToolSchema
+    from motif_ai.core.llm import ToolSchema
 
 
 class BaseToolClient(ABC):
@@ -148,7 +148,7 @@ class MCPSSEClient(BaseToolClient):
         self._connected = True
 
     async def list_tools(self) -> List["ToolSchema"]:
-        from choreo_mini.core.llm import ToolSchema
+        from motif_ai.core.llm import ToolSchema
 
         if not self._connected:
             await self.connect()
@@ -250,7 +250,7 @@ class MCPStdioClient(BaseToolClient):
         self._connected = True
 
     async def list_tools(self) -> List["ToolSchema"]:
-        from choreo_mini.core.llm import ToolSchema
+        from motif_ai.core.llm import ToolSchema
 
         if not self._connected:
             await self.connect()
@@ -326,7 +326,7 @@ class A2AClient(BaseToolClient):
         self._connected = True
 
     async def list_tools(self) -> List["ToolSchema"]:
-        from choreo_mini.core.llm import ToolSchema
+        from motif_ai.core.llm import ToolSchema
 
         if not self._connected:
             await self.connect()
@@ -434,7 +434,7 @@ class HTTPToolClient(BaseToolClient):
         self._connected = True
 
     async def list_tools(self) -> List["ToolSchema"]:
-        from choreo_mini.core.llm import ToolSchema
+        from motif_ai.core.llm import ToolSchema
 
         if not self._connected:
             await self.connect()

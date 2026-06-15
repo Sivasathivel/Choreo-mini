@@ -31,7 +31,7 @@ Each CountryWorkflow takes an `llm` argument.  Replace the CustomLLM callable
 with a real LLM instance to have the agents reason over the parameters in
 natural language:
 
-    from choreo_mini.core.llm import LLM
+    from motif_ai.core.llm import LLM
     llm = LLM(api_key="sk-...", endpoint="https://api.openai.com", model="gpt-4o")
     usa = USAWorkflow(llm=llm)
 """
@@ -42,10 +42,10 @@ import random
 import textwrap
 from typing import Any, Dict, List
 
-from choreo_mini.core.episode import Episode, EpisodeStep, nash_convergence_detector
-from choreo_mini.core.llm import CustomLLM, Message
-from choreo_mini.core.nodes import AgentNode
-from choreo_mini.core.workflow import Workflow
+from motif_ai.core.episode import Episode, EpisodeStep, nash_convergence_detector
+from motif_ai.core.llm import CustomLLM, Message
+from motif_ai.core.nodes import AgentNode
+from motif_ai.core.workflow import Workflow
 
 
 # ---------------------------------------------------------------------------

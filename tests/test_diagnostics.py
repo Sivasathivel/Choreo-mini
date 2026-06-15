@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import pytest
 
-from choreo_mini.core.exceptions import (
+from motif_ai.core.exceptions import (
     ChoreoError,
     WorkflowError,
     AgentNotFoundError,
@@ -15,10 +15,10 @@ from choreo_mini.core.exceptions import (
     LLMError,
     ConversionError,
 )
-from choreo_mini.core.workflow import Workflow
-from choreo_mini.core.episode import Episode
-from choreo_mini.core.llm import CustomLLM
-from choreo_mini.core.nodes import AgentNode
+from motif_ai.core.workflow import Workflow
+from motif_ai.core.episode import Episode
+from motif_ai.core.llm import CustomLLM
+from motif_ai.core.nodes import AgentNode
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +290,7 @@ class TestEpisodeErrors:
 
 class TestPublicExports:
     def test_exceptions_exported_from_package(self):
-        import choreo_mini
+        import motif_ai
         for name in (
             "ChoreoError",
             "WorkflowError",
@@ -300,9 +300,9 @@ class TestPublicExports:
             "LLMError",
             "ConversionError",
         ):
-            assert hasattr(choreo_mini, name), f"{name} not exported from choreo_mini"
+            assert hasattr(motif_ai, name), f"{name} not exported from motif_ai"
 
     def test_exported_exceptions_are_correct_types(self):
-        import choreo_mini
-        assert issubclass(choreo_mini.AgentNotFoundError, choreo_mini.ChoreoError)
-        assert issubclass(choreo_mini.EpisodeError, choreo_mini.ChoreoError)
+        import motif_ai
+        assert issubclass(motif_ai.AgentNotFoundError, motif_ai.ChoreoError)
+        assert issubclass(motif_ai.EpisodeError, motif_ai.ChoreoError)

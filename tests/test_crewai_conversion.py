@@ -11,12 +11,12 @@ from pathlib import Path
 
 import jinja2
 
-from choreo_mini.cli import _build_render_data
-from choreo_mini.core.ast_parser import parse_workflow_code
+from motif_ai.cli import _build_render_data
+from motif_ai.core.ast_parser import parse_workflow_code
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TEMPLATE_DIR = ROOT / "choreo_mini" / "templates" / "crewai"
+TEMPLATE_DIR = ROOT / "motif_ai" / "templates" / "crewai"
 
 
 # ---------------------------------------------------------------------------

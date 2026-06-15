@@ -1,10 +1,10 @@
-"""Structured exception hierarchy for choreo-mini.
+"""Structured exception hierarchy for motif-ai.
 
 All framework exceptions inherit from :class:`ChoreoError` so callers can
 catch them with a single ``except ChoreoError`` clause while still being
 able to distinguish specific failure modes when needed::
 
-    from choreo_mini.core.exceptions import AgentNotFoundError, ChoreoError
+    from motif_ai.core.exceptions import AgentNotFoundError, ChoreoError
 
     try:
         wf.send("Typo", "hello")
@@ -30,7 +30,7 @@ from typing import Any, List, Optional
 
 
 class ChoreoError(Exception):
-    """Base class for all choreo-mini framework exceptions."""
+    """Base class for all motif-ai framework exceptions."""
 
 
 # ---------------------------------------------------------------------------

@@ -25,11 +25,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from choreo_mini.core.llm import CustomLLM, LLM, Message
-from choreo_mini.core.nodes import AgentNode
-from choreo_mini.core.workflow import Workflow
-from choreo_mini.core.episode import Episode
-from choreo_mini.core.observability import (
+from motif_ai.core.llm import CustomLLM, LLM, Message
+from motif_ai.core.nodes import AgentNode
+from motif_ai.core.workflow import Workflow
+from motif_ai.core.episode import Episode
+from motif_ai.core.observability import (
     AgentCallEnd,
     AgentCallError,
     AgentCallStart,

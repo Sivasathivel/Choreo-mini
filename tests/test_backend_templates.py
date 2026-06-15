@@ -3,12 +3,12 @@ from pathlib import Path
 
 import jinja2
 
-from choreo_mini.cli import _build_render_data
-from choreo_mini.core.ast_parser import parse_workflow_code
+from motif_ai.cli import _build_render_data
+from motif_ai.core.ast_parser import parse_workflow_code
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TEMPLATES_ROOT = ROOT / "choreo_mini" / "templates"
+TEMPLATES_ROOT = ROOT / "motif_ai" / "templates"
 
 
 def _render_backend(example_name: str, backend: str) -> tuple[str, dict]:
@@ -74,9 +74,9 @@ toolset=[
 """
 
 _TOOLSET_SOURCE = f"""\
-from choreo_mini.core.workflow import Workflow
-from choreo_mini.core.nodes import AgentNode
-from choreo_mini.core.llm import CustomLLM
+from motif_ai.core.workflow import Workflow
+from motif_ai.core.nodes import AgentNode
+from motif_ai.core.llm import CustomLLM
 
 wf = Workflow("demo")
 bot = AgentNode(wf, "Bot", role="assistant", llm=CustomLLM(lambda p, **kw: "ok"),
@@ -86,7 +86,7 @@ result = wf.send("Bot", "hello")
 
 
 def _render_from_source(source: str, backend: str) -> str:
-    from choreo_mini.cli import _build_render_data
+    from motif_ai.cli import _build_render_data
     workflow_data = parse_workflow_code(source)
     render_data = _build_render_data(workflow_data, backend)
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(TEMPLATES_ROOT / backend))

@@ -1,8 +1,8 @@
 """Multi-agent debate using Episode + Workflow + full observability stack.
 
 Two agents — a Proponent and an Opponent — debate a proposition for several
-rounds inside an :class:`~choreo_mini.core.episode.Episode`.  Every agent call
-and every episode step is traced via :class:`~choreo_mini.core.observability.StdoutHook`
+rounds inside an :class:`~motif_ai.core.episode.Episode`.  Every agent call
+and every episode step is traced via :class:`~motif_ai.core.observability.StdoutHook`
 in real time.  After the debate the workflow state is serialised with
 ``wf.dump()`` so you can inspect the full transcript and performance metrics.
 
@@ -11,7 +11,7 @@ Run with no configuration needed::
     python examples/multi_agent_debate.py
 
 The example uses ``CustomLLM`` (deterministic lambda handlers) so no API key
-or network access is required.  Swap in a real :class:`~choreo_mini.core.llm.LLM`
+or network access is required.  Swap in a real :class:`~motif_ai.core.llm.LLM`
 endpoint to see genuine LLM-generated arguments.
 
 Architecture
@@ -25,7 +25,7 @@ Architecture
         └── AgentNode("Opponent")   ← argues against
 
 Each round the Episode calls both ``propose()`` methods, records actions and
-rewards, and checks the :func:`~choreo_mini.core.episode.nash_convergence_detector`
+rewards, and checks the :func:`~motif_ai.core.episode.nash_convergence_detector`
 criterion.  When rewards stabilise (both agents keep scoring ~1.0) the debate
 is declared concluded.
 """
@@ -42,11 +42,11 @@ project_root = Path(__file__).resolve().parents[1]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from choreo_mini.core.episode import Episode, nash_convergence_detector
-from choreo_mini.core.llm import CustomLLM
-from choreo_mini.core.nodes import AgentNode
-from choreo_mini.core.observability import CompositeHook, JsonFileHook, StdoutHook
-from choreo_mini.core.workflow import Workflow
+from motif_ai.core.episode import Episode, nash_convergence_detector
+from motif_ai.core.llm import CustomLLM
+from motif_ai.core.nodes import AgentNode
+from motif_ai.core.observability import CompositeHook, JsonFileHook, StdoutHook
+from motif_ai.core.workflow import Workflow
 
 
 # ---------------------------------------------------------------------------

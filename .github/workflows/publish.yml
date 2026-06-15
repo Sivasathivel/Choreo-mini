@@ -35,7 +35,7 @@ jobs:
       - name: Check if version already exists on PyPI
         id: pypi_check
         run: |
-          pip index versions choreo-mini 2>/dev/null | grep -q "${{ steps.version.outputs.version }}" \
+          pip index versions motif-ai 2>/dev/null | grep -q "${{ steps.version.outputs.version }}" \
             && echo "exists=true" >> $GITHUB_OUTPUT \
             || echo "exists=false" >> $GITHUB_OUTPUT
 
@@ -54,4 +54,4 @@ jobs:
         if: steps.pypi_check.outputs.exists == 'true'
         run: |
           echo "Version ${{ steps.version.outputs.version }} already exists on PyPI — skipping publish."
-          echo "Bump the version in pyproject.toml and choreo_mini/__init__.py to trigger a new release."
+          echo "Bump the version in pyproject.toml and motif_ai/__init__.py to trigger a new release."

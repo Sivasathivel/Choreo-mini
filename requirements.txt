@@ -2,7 +2,7 @@
 #
 #   pip install -e ".[dev]"
 #
-# This installs choreo-mini + pytest + langgraph (needed for conversion tests).
+# This installs motif-ai + pytest + langgraph (needed for conversion tests).
 #
 # Optional backend extras (install only what you need):
 #

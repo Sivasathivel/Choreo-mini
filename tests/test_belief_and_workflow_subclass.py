@@ -2,10 +2,10 @@
 
 import pytest
 
-from choreo_mini.core.belief import Belief, BeliefState
-from choreo_mini.core.workflow import Workflow, AgentState
-from choreo_mini.core.nodes import AgentNode
-from choreo_mini.core.llm import CustomLLM, Message
+from motif_ai.core.belief import Belief, BeliefState
+from motif_ai.core.workflow import Workflow, AgentState
+from motif_ai.core.nodes import AgentNode
+from motif_ai.core.llm import CustomLLM, Message
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +181,7 @@ class TestWorkflowSubclass:
         assert isinstance(state.belief, BeliefState)
 
     def test_unknown_agent_raises(self):
-        from choreo_mini.core.exceptions import AgentNotFoundError
+        from motif_ai.core.exceptions import AgentNotFoundError
         wf = SimpleWorkflow()
         with pytest.raises(AgentNotFoundError) as exc_info:
             wf.send("NonExistent", "hello")

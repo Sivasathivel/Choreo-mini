@@ -1,4 +1,4 @@
-"""Tests for choreo_mini.core.tool_clients — factory dispatch and client behaviour."""
+"""Tests for motif_ai.core.tool_clients — factory dispatch and client behaviour."""
 
 import asyncio
 from typing import Any, Dict, List
@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from choreo_mini.core.tool_clients import (
+from motif_ai.core.tool_clients import (
     A2AClient,
     BaseToolClient,
     HTTPToolClient,
@@ -14,7 +14,7 @@ from choreo_mini.core.tool_clients import (
     MCPStdioClient,
     create_tool_client,
 )
-from choreo_mini.core.llm import ToolSchema
+from motif_ai.core.llm import ToolSchema
 
 
 # ---------------------------------------------------------------------------

@@ -21,8 +21,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from choreo_mini.core.llm import LLM, CustomLLM, Message, ToolSchema, ToolCallMessage
-from choreo_mini.core.nodes import AgentNode
+from motif_ai.core.llm import LLM, CustomLLM, Message, ToolSchema, ToolCallMessage
+from motif_ai.core.nodes import AgentNode
 
 
 # ---------------------------------------------------------------------------
