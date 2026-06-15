@@ -68,9 +68,13 @@ from choreo_mini.core.workflow import Workflow
 # Config
 # ---------------------------------------------------------------------------
 
-API_KEY    = os.getenv("OPENAI_API_KEY", "").strip()
-MODEL      = os.getenv("CUSMA_MODEL", "gpt-4o-mini")
-MAX_ROUNDS = int(os.getenv("CUSMA_MAX_ROUNDS", "8"))
+API_KEY         = os.getenv("OPENAI_API_KEY", "").strip()
+MODEL           = os.getenv("CUSMA_MODEL", "gpt-4o-mini")
+MAX_ROUNDS      = int(os.getenv("CUSMA_MAX_ROUNDS", "8"))
+# Keep at most this many prior exchanges in each agent's context window.
+# 1 = only the immediately preceding round; raise for richer continuity at
+# the cost of more tokens.  Default 1 keeps live runs within free-tier TPM.
+MAX_HISTORY_CTX = int(os.getenv("CUSMA_MAX_HISTORY", "1"))
 
 # Reference areas — not an exhaustive list; parties may raise any CUSMA-relevant topic.
 REFERENCE_AREAS = [
@@ -737,15 +741,32 @@ class _CountryWorkflow(Workflow):
 
     def propose(self, env_state: Dict[str, Any], round_n: int) -> str:
         """Called by the Episode each round; returns this country's proposal."""
-        others = {
-            k: v for k, v in env_state.get("proposals", {}).items()
-            if k != self.country and v
-        }
-        context_block = ""
+        all_prev = env_state.get("proposals", {})
+        others = {k: v for k, v in all_prev.items() if k != self.country and v}
+
+        # Build context block: other parties' latest proposals + own last proposal.
+        context_parts: List[str] = []
         if others:
-            context_block = "\n\nOther parties' positions (previous round):\n" + "\n---\n".join(
-                f"[{country}]\n{proposal}" for country, proposal in others.items()
+            context_parts.append(
+                "Other parties' positions (previous round):\n" + "\n---\n".join(
+                    f"[{c}]\n{p}" for c, p in others.items()
+                )
             )
+        if self.proposals:
+            context_parts.append(
+                f"Your own position last round [{self.country}]:\n{self.proposals[-1]}"
+            )
+        context_block = ("\n\n" + "\n\n".join(context_parts)) if context_parts else ""
+
+        # Trim agent history to the last MAX_HISTORY_CTX round (1 user + 1 assistant
+        # message per round) so context doesn't balloon across many rounds.
+        agent_name = f"{self.country}Negotiator"
+        history = self.get_history(agent_name)
+        keep = MAX_HISTORY_CTX * 2          # pairs of (user, assistant) messages
+        if len(history) > keep:
+            self.clear_history(agent_name)
+            for msg in history[-keep:]:
+                self._get_agent_state(agent_name).history.append(msg)
 
         urgency = _urgency_block(round_n, MAX_ROUNDS)
 
